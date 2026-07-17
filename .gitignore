@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+dist/
+build/
+coverage/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Cursor — keep Spec Kit skills; ignore local agent state/credentials
+.cursor/*
+!.cursor/skills/
+!.cursor/skills/**
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# Lockfiles from other package managers
+package-lock.json
+yarn.lock
+
+
+# Test
+/test-results/
+/playwright-report/
+
+# Misc
+*.tsbuildinfo
+.turbo/

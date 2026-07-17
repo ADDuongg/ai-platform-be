@@ -1,0 +1,321 @@
+openapi: 3.0.3
+info:
+  title: Kids Fashion Trend Research Workflow Contract
+  version: 1.0.0
+  description: |
+    Milestone 2 — Trend Research Workflow (`kids-fashion-trend-research`).
+
+    **No new REST routes.** Clients use existing Workflow Execution APIs
+    (`specs/005-workflow-execution/contracts/executions-api.yaml`).
+
+    This document specifies:
+    - Execution input shape for this Workflow
+    - `definition.policies.requiredInputs` platform convention
+    - Shared Context handoff keys after a completed run
+    - Seeded catalog codes (Workflow / Agents / Prompts)
+
+servers:
+  - url: /api/v1
+    description: Platform API base
+
+tags:
+  - name: TrendResearch
+    description: Conventions for kids-fashion-trend-research Execution
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [TrendResearch]
+      summary: Start Kids Fashion Trend Research Execution
+      description: |
+        Same endpoint as Execution module. When `id` is the published Workflow
+        `kids-fashion-trend-research`, request `input` MUST include non-blank
+        `season`, `category`, and `market` (enforced via `policies.requiredInputs`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of published Workflow kids-fashion-trend-research
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteTrendResearchRequest'
+            examples:
+              happyPath:
+                summary: Sample SS27 kids apparel VN
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    ageBand: '3-8'
+                    constraints: playful colors; school-friendly
+      responses:
+        '201':
+          description: Execution created (pending/running/completed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrendResearchExecution'
+        '400':
+          description: Missing or blank required input fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequiredInputValidationError'
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden — missing workflows:execute / executions:create }
+        '404': { description: Workflow not found or not published }
+        '422': { description: Invalid definition or unavailable Agents }
+
+  /executions:
+    post:
+      tags: [TrendResearch]
+      summary: Start Trend Research via collection create
+      description: |
+        Alternate start path. Body MUST include `workflowId` of
+        `kids-fashion-trend-research` and the same required `input` keys.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTrendResearchExecutionRequest'
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrendResearchExecution'
+        '400':
+          description: Missing or blank required input fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequiredInputValidationError'
+
+  /executions/{id}:
+    get:
+      tags: [TrendResearch]
+      summary: Get Trend Research Execution (incl. context handoff)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Execution detail; when completed, context includes researchReport
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrendResearchExecution'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    TrendResearchExecutionInput:
+      type: object
+      required: [season, category, market]
+      additionalProperties: true
+      properties:
+        season:
+          type: string
+          minLength: 1
+          example: SS27
+          description: Fashion season code (non-blank)
+        category:
+          type: string
+          minLength: 1
+          example: kids-apparel
+        market:
+          type: string
+          minLength: 1
+          example: VN
+        ageBand:
+          type: string
+          example: '3-8'
+        constraints:
+          type: string
+          example: playful colors; school-friendly
+
+    ExecuteTrendResearchRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: Optional published Workflow version; default = current published
+        input:
+          $ref: '#/components/schemas/TrendResearchExecutionInput'
+      required: [input]
+
+    CreateTrendResearchExecutionRequest:
+      type: object
+      required: [workflowId, input]
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        input:
+          $ref: '#/components/schemas/TrendResearchExecutionInput'
+
+    RequiredInputsPolicy:
+      type: object
+      description: |
+        Stored at Workflow `definition_json.policies.requiredInputs`.
+        Enforced generically at Execution start for any Workflow.
+      properties:
+        requiredInputs:
+          type: array
+          items: { type: string }
+          example: [season, category, market]
+
+    ReferenceItem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        url: { type: string, format: uri }
+        notes: { type: string }
+
+    TrendFindings:
+      type: object
+      required: [summary, trends]
+      properties:
+        summary: { type: string }
+        trends:
+          type: array
+          items: { type: object }
+          minItems: 0
+
+    ResearchReport:
+      type: object
+      required: [summary, trends, references, gaps]
+      properties:
+        summary: { type: string }
+        trends:
+          type: array
+          items: { type: object }
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        gaps:
+          type: array
+          items: { type: string }
+
+    TrendResearchContext:
+      type: object
+      description: Shared Context keys after a successful completed run
+      properties:
+        season: { type: string }
+        category: { type: string }
+        market: { type: string }
+        ageBand: { type: string }
+        constraints: { type: string }
+        trendFindings:
+          $ref: '#/components/schemas/TrendFindings'
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReferenceItem'
+        researchReport:
+          $ref: '#/components/schemas/ResearchReport'
+        input:
+          $ref: '#/components/schemas/TrendResearchExecutionInput'
+
+    TrendResearchExecution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workflowId: { type: string, format: uuid }
+        workflowCode:
+          type: string
+          enum: [kids-fashion-trend-research]
+        workflowVersion: { type: integer }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        input:
+          $ref: '#/components/schemas/TrendResearchExecutionInput'
+        context:
+          $ref: '#/components/schemas/TrendResearchContext'
+        error:
+          type: object
+          nullable: true
+        startedBy: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    RequiredInputValidationError:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_ERROR]
+        message: { type: string }
+        details:
+          type: object
+          properties:
+            field:
+              type: string
+              enum: [input]
+            required:
+              type: array
+              items: { type: string }
+            missing:
+              type: array
+              items: { type: string }
+            blank:
+              type: array
+              items: { type: string }
+
+    CatalogCodes:
+      type: object
+      description: Seeded identity codes for this feature
+      properties:
+        workflowCode:
+          type: string
+          enum: [kids-fashion-trend-research]
+        agentCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-trend-research
+              - fashion-reference-collector
+              - fashion-research-report
+        promptCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-trend-research-prompt
+              - fashion-reference-collector-prompt
+              - fashion-research-report-prompt
+        toolCodes:
+          type: array
+          items:
+            type: string
+            enum: [web-search]

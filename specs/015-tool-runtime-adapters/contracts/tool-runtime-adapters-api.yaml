@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: Tool Runtime Adapters (internal Execution) — Client Contract
+  version: 0.1.0
+  description: |
+    No new public HTTP routes. Operators use existing Execution APIs.
+    Tool runtime is internal: ToolInvoker + adapters under Execution,
+    pre-step enrichment inside the live LLM Agent runner.
+    This document describes reused surfaces and env configuration for FE/ops.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: Executions
+    description: Existing Execution APIs (unchanged paths)
+paths:
+  /workflows/{workflowId}/executions:
+    post:
+      tags: [Executions]
+      summary: Start Workflow Execution (unchanged)
+      operationId: executeWorkflow
+      parameters:
+        - name: workflowId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /executions/{executionId}:
+    get:
+      tags: [Executions]
+      summary: Get Execution detail including Shared Context (unchanged)
+      operationId: getExecution
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Execution detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /executions/{executionId}/steps:
+    get:
+      tags: [Executions]
+      summary: List Execution steps (unchanged)
+      operationId: listExecutionSteps
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Steps
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionStep'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing/invalid access token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: Missing permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [statusCode, message, error]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+        error:
+          type: string
+        traceId:
+          type: string
+    ExecuteWorkflowRequest:
+      type: object
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+        idempotencyKey:
+          type: string
+    ExecutionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        workflowId:
+          type: string
+          format: uuid
+    ExecutionDetail:
+      allOf:
+        - $ref: '#/components/schemas/ExecutionSummary'
+        - type: object
+          properties:
+            sharedContext:
+              type: object
+              additionalProperties: true
+    ExecutionStep:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        agentCode:
+          type: string
+        error:
+          type: string
+          nullable: true
+    ToolRuntimeEnvConfig:
+      type: object
+      description: Ops/env view — not an HTTP resource
+      required: [TOOL_RUNTIME]
+      properties:
+        TOOL_RUNTIME:
+          type: string
+          enum: [stub, live]
+          default: stub
+        TOOL_STORAGE_ROOT:
+          type: string
+          default: .data/tool-storage
+        TOOL_RESULT_MAX_BYTES:
+          type: integer
+          default: 262144
+        GOOGLE_CSE_API_KEY:
+          type: string
+          description: Future only — commented in MVP
+        GOOGLE_CSE_CX:
+          type: string
+          description: Future only — commented in MVP
+        BROWSERLESS_URL:
+          type: string
+          description: Future only — commented in MVP
+        BROWSERLESS_TOKEN:
+          type: string
+          description: Future only — commented in MVP
+        FLUX_API_KEY:
+          type: string
+          description: Future only — commented in MVP
+        AWS_ACCESS_KEY_ID:
+          type: string
+          description: Future only — commented in MVP
+        AWS_SECRET_ACCESS_KEY:
+          type: string
+          description: Future only — commented in MVP
+        AWS_S3_BUCKET:
+          type: string
+          description: Future only — commented in MVP
+        AWS_REGION:
+          type: string
+          description: Future only — commented in MVP
+    ToolEnrichmentBundle:
+      type: object
+      description: Injected into live LLM Prompt; not a dedicated REST body
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          items:
+            type: object
+            required: [code, result]
+            properties:
+              code:
+                type: string
+              result:
+                type: object
+                additionalProperties: true

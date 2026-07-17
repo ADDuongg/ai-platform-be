@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: Kids Fashion Image Generation Workflow Contract
+  version: 1.0.0
+  description: |
+    Milestone 2 — Image Generation Workflow (`kids-fashion-image-generation`).
+
+    **No new REST routes.** Clients use existing Workflow Execution APIs
+    (`specs/005-workflow-execution/contracts/executions-api.yaml`).
+
+    This document specifies:
+    - Execution input shape for this Workflow
+    - Shared Context handoff keys after a completed run
+    - Seeded catalog codes (Workflow / Agents / Prompts / Tools)
+
+servers:
+  - url: /api/v1
+    description: Platform API base
+
+tags:
+  - name: ImageGeneration
+    description: Conventions for kids-fashion-image-generation Execution
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [ImageGeneration]
+      summary: Start Kids Fashion Image Generation Execution
+      description: |
+        Same endpoint as Execution module. When `id` is the published Workflow
+        `kids-fashion-image-generation`, request `input` MUST include non-blank
+        `season`, `category`, `market`, and present `designBrief` +
+        `designSpecification` (enforced via `policies.requiredInputs`).
+        Completed context MUST include `generatedImages` (required Design Review
+        handoff), plus intermediates `imageGenPrompts` and `rawGenerations`.
+        Default stub fixtures produce exactly 2 variations.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of published Workflow kids-fashion-image-generation
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteImageGenerationRequest'
+            examples:
+              withDesignBriefHandoff:
+                summary: Sample SS27 with Design Brief keys
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    ageBand: '3-8'
+                    constraints: playful colors; school-friendly
+                    designBrief:
+                      summary: Playful color-block kids apparel for SS27 VN
+                      themes: [{ label: Playful color blocking }]
+                      mustHaves: [{ label: Warm cream base with pastel accents }]
+                      avoid: [{ label: Harsh neon overload }]
+                    designSpecification:
+                      summary: Specification for playful kids color-block concept
+                      objectives:
+                        - { label: Deliver playful color-block kids apparel concept }
+                      constraints: [{ label: Age-appropriate, school-friendly }]
+                      colorDirection: [{ label: Cream base + pastel accents }]
+                      styleDirection: [{ label: Relaxed silhouette }]
+                      patternDirection: [{ label: Soft geometric blocks }]
+                      deliverables: [{ label: Two concept artwork variations }]
+      responses:
+        '201':
+          description: Execution created
+        '400':
+          description: Missing or blank required input fields
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Workflow not found or not published }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ExecuteImageGenerationRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          $ref: '#/components/schemas/ImageGenerationExecutionInput'
+
+    ImageGenerationExecutionInput:
+      type: object
+      required:
+        - season
+        - category
+        - market
+        - designBrief
+        - designSpecification
+      properties:
+        season: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1 }
+        market: { type: string, minLength: 1 }
+        ageBand: { type: string }
+        constraints: { type: string }
+        designBrief: { type: object, additionalProperties: true }
+        designSpecification: { type: object, additionalProperties: true }
+
+    ImageGenPromptItem:
+      type: object
+      required: [id, label, text]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        text: { type: string }
+
+    ImageGenPrompts:
+      type: object
+      required: [summary, prompts]
+      properties:
+        summary: { type: string }
+        prompts:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/ImageGenPromptItem'
+
+    GenerationVariation:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        promptRef: { type: string }
+        assetUrl: { type: string }
+        notes: { type: string }
+
+    GeneratedImages:
+      type: object
+      required: [summary, variations]
+      properties:
+        summary: { type: string }
+        variations:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/GenerationVariation'
+
+    ImageGenerationCompletedContext:
+      type: object
+      description: Expected Shared Context keys after completed stub run
+      required: [imageGenPrompts, rawGenerations, generatedImages]
+      properties:
+        imageGenPrompts:
+          $ref: '#/components/schemas/ImageGenPrompts'
+        rawGenerations:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/GenerationVariation'
+        generatedImages:
+          $ref: '#/components/schemas/GeneratedImages'
+
+    SeededCatalogCodes:
+      type: object
+      description: Idempotent seed codes
+      properties:
+        workflowCode:
+          type: string
+          enum: [kids-fashion-image-generation]
+        agentCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-image-prompt-prep
+              - fashion-image-generator
+              - fashion-image-organizer
+        promptCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-image-prompt-prep-prompt
+              - fashion-image-generator-prompt
+              - fashion-image-organizer-prompt
+        toolRefs:
+          type: object
+          properties:
+            fashion-image-generator:
+              type: array
+              items: { type: string, enum: [image-generation] }
+            fashion-image-organizer:
+              type: array
+              items: { type: string, enum: [object-storage] }

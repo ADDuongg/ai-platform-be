@@ -1,0 +1,637 @@
+openapi: 3.0.3
+info:
+  title: AI Platform — Tool Library API
+  version: 1.0.0
+  description: >
+    Tool catalog registry for Phase 1. Admins mutate; non-admins read published Tools only
+    (including enabled=false). FE typed contracts: `types.ts`, `interfaces.ts` (`ToolsApiClient`).
+    Runtime responses wrapped as `{ success, data, meta }` / `{ success: false, error, timestamp, path }`.
+    Agent toolRefs assignment is validated via Agents APIs using Tools read service (no SQL FK).
+servers:
+  - url: /api/v1
+tags:
+  - name: Tools
+paths:
+  /tools:
+    get:
+      tags: [Tools]
+      summary: List Tools
+      operationId: listTools
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ToolStatus'
+          description: Admins may filter any status; non-admins always constrained to published
+        - name: toolType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ToolType'
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated tool list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Tools]
+      summary: Register draft Tool
+      operationId: createTool
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `tools:create`. `toolType` is immutable after create.
+        Config MAY be empty; plaintext secret-shaped keys are rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolRequest'
+      responses:
+        '201':
+          description: Draft tool created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /tools/by-code/{code}:
+    get:
+      tags: [Tools]
+      summary: Get Tool by code
+      operationId: getToolByCode
+      security:
+        - bearerAuth: []
+      description: >
+        Resolves to the current active Tool with this code (ignores archived rows).
+        Non-admins only succeed for published Tools.
+      parameters:
+        - $ref: '#/components/parameters/ToolCode'
+      responses:
+        '200':
+          description: Tool detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tools/{id}:
+    get:
+      tags: [Tools]
+      summary: Get Tool by id
+      operationId: getTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Tool detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Tools]
+      summary: Update Tool metadata or draft version config
+      operationId: updateTool
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `tools:update`. Cannot change `code` or `toolType`.
+        Published version config is immutable — updates apply to draft version only.
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateToolRequest'
+      responses:
+        '200':
+          description: Updated tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Tools]
+      summary: Soft-delete Tool (archive)
+      operationId: deleteTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tools/{id}/publish:
+    post:
+      tags: [Tools]
+      summary: Publish draft Tool version
+      operationId: publishTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Published tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /tools/{id}/enable:
+    post:
+      tags: [Tools]
+      summary: Enable Tool
+      operationId: enableTool
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Enabled tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /tools/{id}/disable:
+    post:
+      tags: [Tools]
+      summary: Disable Tool
+      operationId: disableTool
+      security:
+        - bearerAuth: []
+      description: Sets enabled=false without changing lifecycle status. Blocks new Agent assignment.
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Disabled tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tools/{id}/versions:
+    get:
+      tags: [Tools]
+      summary: List Tool versions
+      operationId: listToolVersions
+      security:
+        - bearerAuth: []
+      description: Non-admins see published versions only.
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      responses:
+        '200':
+          description: Version list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolVersionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Tools]
+      summary: Create parallel draft version from published
+      operationId: createToolVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolVersionRequest'
+      responses:
+        '201':
+          description: Draft version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolVersionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /tools/{id}/versions/{version}:
+    get:
+      tags: [Tools]
+      summary: Get specific Tool version
+      operationId: getToolVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ToolId'
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Version detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolVersionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ToolId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ToolCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        maxLength: 64
+  schemas:
+    ToolStatus:
+      type: string
+      enum: [draft, published, archived]
+    ToolVersionStatus:
+      type: string
+      enum: [draft, published]
+    ToolType:
+      type: string
+      enum: [search, browser, image_generation, storage, http, custom]
+    JsonObject:
+      type: object
+      additionalProperties: true
+    CreateToolRequest:
+      type: object
+      required: [code, name, toolType]
+      properties:
+        code:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+        toolType:
+          $ref: '#/components/schemas/ToolType'
+        config:
+          $ref: '#/components/schemas/JsonObject'
+        inputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        outputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        secretRef:
+          type: string
+          nullable: true
+          maxLength: 255
+        timeoutMs:
+          type: integer
+          nullable: true
+          minimum: 1
+        maxRetries:
+          type: integer
+          nullable: true
+          minimum: 0
+        changelog:
+          type: string
+          nullable: true
+    UpdateToolRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          nullable: true
+        config:
+          $ref: '#/components/schemas/JsonObject'
+        inputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        outputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        secretRef:
+          type: string
+          nullable: true
+          maxLength: 255
+        timeoutMs:
+          type: integer
+          nullable: true
+          minimum: 1
+        maxRetries:
+          type: integer
+          nullable: true
+          minimum: 0
+        changelog:
+          type: string
+          nullable: true
+    CreateToolVersionRequest:
+      type: object
+      properties:
+        changelog:
+          type: string
+          nullable: true
+    ToolResponse:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - toolType
+        - status
+        - enabled
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        toolType:
+          $ref: '#/components/schemas/ToolType'
+        status:
+          $ref: '#/components/schemas/ToolStatus'
+        enabled:
+          type: boolean
+        currentVersion:
+          type: integer
+          nullable: true
+        draftVersion:
+          type: integer
+          nullable: true
+          description: Present for admins when a parallel draft version exists
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ToolListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolResponse'
+        meta:
+          type: object
+          required: [page, limit, total]
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+    ToolVersionResponse:
+      type: object
+      required:
+        - id
+        - toolId
+        - version
+        - status
+        - config
+        - inputSchema
+        - outputSchema
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        toolId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          $ref: '#/components/schemas/ToolVersionStatus'
+        config:
+          $ref: '#/components/schemas/JsonObject'
+        inputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        outputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        secretRef:
+          type: string
+          nullable: true
+        timeoutMs:
+          type: integer
+          nullable: true
+        maxRetries:
+          type: integer
+          nullable: true
+        changelog:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    ToolVersionListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolVersionResponse'
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    ApiErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          nullable: true
+    ApiErrorResponse:
+      type: object
+      required: [success, error, timestamp, path]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/ApiErrorBody'
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Forbidden:
+      description: Authenticated but missing permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    BadRequest:
+      description: Validation error (including secret-shaped config keys)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    NotFound:
+      description: Tool or version not found (or draft hidden from non-admin)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Conflict:
+      description: Duplicate code, immutable version, or invalid lifecycle transition
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'

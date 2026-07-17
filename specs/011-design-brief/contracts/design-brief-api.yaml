@@ -1,0 +1,179 @@
+openapi: 3.0.3
+info:
+  title: Kids Fashion Design Brief Workflow Contract
+  version: 1.0.0
+  description: |
+    Milestone 2 — Design Brief Workflow (`kids-fashion-design-brief`).
+
+    **No new REST routes.** Clients use existing Workflow Execution APIs
+    (`specs/005-workflow-execution/contracts/executions-api.yaml`).
+
+    This document specifies:
+    - Execution input shape for this Workflow
+    - Shared Context handoff keys after a completed run
+    - Seeded catalog codes (Workflow / Agents / Prompts)
+
+servers:
+  - url: /api/v1
+    description: Platform API base
+
+tags:
+  - name: DesignBrief
+    description: Conventions for kids-fashion-design-brief Execution
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [DesignBrief]
+      summary: Start Kids Fashion Design Brief Execution
+      description: |
+        Same endpoint as Execution module. When `id` is the published Workflow
+        `kids-fashion-design-brief`, request `input` MUST include non-blank
+        `season`, `category`, and `market` (enforced via `policies.requiredInputs`).
+        Optional Style Analysis keys enrich the brief when present.
+        Completed context MUST include both `designBrief` and `designSpecification`
+        (required Image Generation handoff).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of published Workflow kids-fashion-design-brief
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteDesignBriefRequest'
+            examples:
+              standalone:
+                summary: Sample SS27 kids apparel VN
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    ageBand: '3-8'
+                    constraints: playful colors; school-friendly
+              withStyleHandoff:
+                summary: With styleReport enrichment
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    styleReport:
+                      summary: Playful color-forward kids apparel
+                      colors: [{ label: Coral and sky blue }]
+                      styles: [{ label: Relaxed silhouette }]
+                      patterns: [{ label: Small geo print }]
+                      illustrationNotes: []
+                      recommendations: []
+      responses:
+        '201':
+          description: Execution created
+        '400':
+          description: Missing or blank required input fields
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Workflow not found or not published }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ExecuteDesignBriefRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          $ref: '#/components/schemas/DesignBriefInput'
+
+    DesignBriefInput:
+      type: object
+      required: [season, category, market]
+      properties:
+        season: { type: string, example: SS27 }
+        category: { type: string, example: kids-apparel }
+        market: { type: string, example: VN }
+        ageBand: { type: string }
+        constraints: { type: string }
+        styleReport: { type: object, additionalProperties: true }
+        colorAnalysis: { type: object, additionalProperties: true }
+        styleAnalysis: { type: object, additionalProperties: true }
+        patternAnalysis: { type: object, additionalProperties: true }
+
+    LabeledNote:
+      type: object
+      required: [label]
+      properties:
+        label: { type: string }
+        notes: { type: string }
+
+    DesignBrief:
+      type: object
+      required: [summary, themes, mustHaves, avoid]
+      properties:
+        summary: { type: string }
+        themes:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        mustHaves:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        avoid:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+
+    DesignSpecification:
+      type: object
+      required:
+        - summary
+        - objectives
+        - constraints
+        - colorDirection
+        - styleDirection
+        - patternDirection
+        - deliverables
+      properties:
+        summary: { type: string }
+        objectives:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        constraints:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        colorDirection:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        styleDirection:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        patternDirection:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+        deliverables:
+          type: array
+          items: { $ref: '#/components/schemas/LabeledNote' }
+
+  examples:
+    SeededCatalogCodes:
+      summary: Seeded codes for Design Brief
+      value:
+        workflowCode: kids-fashion-design-brief
+        agentCodes:
+          - fashion-design-brief-writer
+          - fashion-design-spec-writer
+        promptCodes:
+          - fashion-design-brief-writer-prompt
+          - fashion-design-spec-writer-prompt
+        toolRefs: []
+        contextKeys:
+          intermediate: [designBrief]
+          output: [designBrief, designSpecification]
+          imageGenerationHandoff: [designBrief, designSpecification]

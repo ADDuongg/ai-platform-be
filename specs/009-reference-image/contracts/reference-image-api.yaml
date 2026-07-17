@@ -1,0 +1,154 @@
+openapi: 3.0.3
+info:
+  title: Kids Fashion Reference Image Workflow Contract
+  version: 1.0.0
+  description: |
+    Milestone 2 — Reference Image Workflow (`kids-fashion-reference-image`).
+
+    **No new REST routes.** Clients use existing Workflow Execution APIs
+    (`specs/005-workflow-execution/contracts/executions-api.yaml`).
+
+    This document specifies:
+    - Execution input shape for this Workflow
+    - Shared Context handoff keys after a completed run
+    - Seeded catalog codes (Workflow / Agents / Prompts)
+
+servers:
+  - url: /api/v1
+    description: Platform API base
+
+tags:
+  - name: ReferenceImage
+    description: Conventions for kids-fashion-reference-image Execution
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [ReferenceImage]
+      summary: Start Kids Fashion Reference Image Execution
+      description: |
+        Same endpoint as Execution module. When `id` is the published Workflow
+        `kids-fashion-reference-image`, request `input` MUST include non-blank
+        `season`, `category`, and `market` (enforced via `policies.requiredInputs`).
+        Optional Trend Research keys enrich search when present.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of published Workflow kids-fashion-reference-image
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteReferenceImageRequest'
+            examples:
+              standalone:
+                summary: Sample SS27 kids apparel VN
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    ageBand: '3-8'
+                    constraints: playful colors; school-friendly
+              withTrendHandoff:
+                summary: With researchReport enrichment
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    researchReport:
+                      summary: Trend signals for kids-apparel SS27 in VN
+                      trends: [{ name: Playful color blocking }]
+                      references: []
+                      gaps: []
+      responses:
+        '201':
+          description: Execution created
+        '400':
+          description: Missing or blank required input fields
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Workflow not found or not published }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ExecuteReferenceImageRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          $ref: '#/components/schemas/ReferenceImageInput'
+
+    ReferenceImageInput:
+      type: object
+      required: [season, category, market]
+      properties:
+        season: { type: string, example: SS27 }
+        category: { type: string, example: kids-apparel }
+        market: { type: string, example: VN }
+        ageBand: { type: string }
+        constraints: { type: string }
+        researchReport: { type: object, additionalProperties: true }
+        references:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceItem' }
+        trendFindings: { type: object, additionalProperties: true }
+
+    ReferenceItem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        url: { type: string, format: uri }
+        thumbnailUrl: { type: string, format: uri }
+        notes: { type: string }
+
+    InspirationBoard:
+      type: object
+      required: [summary, groups, references, notes]
+      properties:
+        summary: { type: string }
+        groups:
+          type: array
+          items:
+            type: object
+            required: [group, items]
+            properties:
+              group: { type: string }
+              items:
+                type: array
+                items: { $ref: '#/components/schemas/ReferenceItem' }
+        references:
+          type: array
+          items: { $ref: '#/components/schemas/ReferenceItem' }
+        notes:
+          type: array
+          items: { type: string }
+
+  examples:
+    SeededCatalogCodes:
+      summary: Seeded codes for Reference Image
+      value:
+        workflowCode: kids-fashion-reference-image
+        agentCodes:
+          - fashion-image-search
+          - fashion-reference-grouper
+          - fashion-inspiration-organizer
+        promptCodes:
+          - fashion-image-search-prompt
+          - fashion-reference-grouper-prompt
+          - fashion-inspiration-organizer-prompt
+        contextKeys:
+          intermediate: [imageCandidates, groupedReferences]
+          output: [inspirationBoard]

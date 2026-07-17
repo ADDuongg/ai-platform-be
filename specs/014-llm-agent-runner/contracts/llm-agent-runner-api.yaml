@@ -1,0 +1,194 @@
+openapi: 3.0.3
+info:
+  title: LLM Agent Runner (Ollama) — Client Contract
+  version: 1.0.0
+  description: |
+    Phase 2.5 runtime feature. **No new public HTTP routes.**
+    Clients continue to use existing Workflow Execution APIs.
+    Runner mode is selected via process environment only.
+servers:
+  - url: /api/v1
+tags:
+  - name: Executions
+    description: Existing Execution surfaces (unchanged paths)
+  - name: RuntimeConfig
+    description: Documented environment configuration (not REST)
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [Executions]
+      summary: Start Workflow Execution (unchanged)
+      description: |
+        Behavior unchanged at the HTTP layer. When `AGENT_RUNNER=ollama`,
+        agent steps invoke the local LLM; when `stub` (default), fixtures apply.
+      operationId: executeWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionSummary'
+        '400':
+          description: Validation error (e.g. requiredInputs)
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+
+  /executions/{id}:
+    get:
+      tags: [Executions]
+      summary: Get Execution (unchanged)
+      operationId: getExecution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Execution detail including Shared Context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionDetail'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+
+  /executions/{id}/steps:
+    get:
+      tags: [Executions]
+      summary: List Execution steps (unchanged)
+      operationId: listExecutionSteps
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Step list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionStep'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    AgentRunnerMode:
+      type: string
+      enum: [stub, ollama, openai, gemini]
+      default: stub
+      description: Process env AGENT_RUNNER — stub fixtures or live LLM provider id
+
+    ExecuteWorkflowRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+
+    ExecutionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        workflowCode:
+          type: string
+
+    ExecutionDetail:
+      allOf:
+        - $ref: '#/components/schemas/ExecutionSummary'
+        - type: object
+          properties:
+            context:
+              type: object
+              additionalProperties: true
+              description: Shared Context; live mode yields non-fixture JSON for fashion agents
+            error:
+              type: object
+              nullable: true
+              additionalProperties: true
+
+    ExecutionStep:
+      type: object
+      properties:
+        nodeId:
+          type: string
+        agentCode:
+          type: string
+        status:
+          type: string
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    RuntimeEnvConfig:
+      type: object
+      description: Not exposed via REST — operator process environment
+      properties:
+        AGENT_RUNNER:
+          $ref: '#/components/schemas/AgentRunnerMode'
+        OLLAMA_BASE_URL:
+          type: string
+          format: uri
+          example: http://127.0.0.1:11434
+        OLLAMA_MODEL:
+          type: string
+          example: llama3.2
+        OLLAMA_TIMEOUT_MS:
+          type: integer
+          default: 120000
+          minimum: 1
+      x-constraints:
+        maxResponseBytes: 1048576
+        logFullPromptAndResponse: true

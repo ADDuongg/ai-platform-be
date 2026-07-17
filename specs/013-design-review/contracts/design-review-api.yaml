@@ -1,0 +1,252 @@
+openapi: 3.0.3
+info:
+  title: Kids Fashion Design Review Workflow Contract
+  version: 1.0.0
+  description: |
+    Milestone 2 — Design Review Workflow (`kids-fashion-design-review`).
+
+    **No new REST routes.** Clients use existing Workflow Execution APIs
+    (`specs/005-workflow-execution/contracts/executions-api.yaml`).
+
+    This document specifies:
+    - Execution input shape for this Workflow
+    - Shared Context keys after a completed run
+    - Seeded catalog codes (Workflow / Agents / Prompts / Tools)
+
+servers:
+  - url: /api/v1
+    description: Platform API base
+
+tags:
+  - name: DesignReview
+    description: Conventions for kids-fashion-design-review Execution
+
+paths:
+  /workflows/{id}/execute:
+    post:
+      tags: [DesignReview]
+      summary: Start Kids Fashion Design Review Execution
+      description: |
+        Same endpoint as Execution module. When `id` is the published Workflow
+        `kids-fashion-design-review`, request `input` MUST include non-blank
+        `season`, `category`, `market`, and present `generatedImages`
+        (enforced via `policies.requiredInputs`). Minimum variation count is
+        NOT enforced at start. Completed context MUST include
+        `qualityReview`, `improvementSuggestions`, and `designReviewScore`.
+        Default stub fixtures produce `perVariation` with exactly 2 entries.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID of published Workflow kids-fashion-design-review
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteDesignReviewRequest'
+            examples:
+              withGeneratedImagesHandoff:
+                summary: Sample SS27 with Image Generation keys
+                value:
+                  input:
+                    season: SS27
+                    category: kids-apparel
+                    market: VN
+                    ageBand: '3-8'
+                    constraints: playful colors; school-friendly
+                    generatedImages:
+                      summary: Two playful color-block kids apparel concepts
+                      variations:
+                        - id: var-1
+                          label: Cream base pastel blocks
+                          promptRef: prompt-1
+                          assetUrl: stub://generated/var-1.png
+                        - id: var-2
+                          label: Soft geometric playground
+                          promptRef: prompt-2
+                          assetUrl: stub://generated/var-2.png
+      responses:
+        '201':
+          description: Execution created
+        '400':
+          description: Missing or blank required input fields
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Workflow not found or not published }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ExecuteDesignReviewRequest:
+      type: object
+      required: [input]
+      properties:
+        input:
+          $ref: '#/components/schemas/DesignReviewExecutionInput'
+
+    DesignReviewExecutionInput:
+      type: object
+      required:
+        - season
+        - category
+        - market
+        - generatedImages
+      properties:
+        season: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1 }
+        market: { type: string, minLength: 1 }
+        ageBand: { type: string }
+        constraints: { type: string }
+        designBrief: { type: object, additionalProperties: true }
+        designSpecification: { type: object, additionalProperties: true }
+        generatedImages:
+          $ref: '#/components/schemas/GeneratedImages'
+
+    GeneratedImages:
+      type: object
+      required: [summary, variations]
+      properties:
+        summary: { type: string }
+        variations:
+          type: array
+          items:
+            $ref: '#/components/schemas/GenerationVariation'
+
+    GenerationVariation:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        promptRef: { type: string }
+        assetUrl: { type: string }
+        notes: { type: string }
+
+    QualityFinding:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        severity:
+          type: string
+          description: Optional free-text; no enum enforcement
+        variationRef: { type: string }
+        notes: { type: string }
+
+    QualityReview:
+      type: object
+      required: [summary, findings]
+      properties:
+        summary: { type: string }
+        findings:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/QualityFinding'
+
+    ImprovementSuggestion:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        priority: { type: string }
+        variationRef: { type: string }
+        notes: { type: string }
+
+    ImprovementSuggestions:
+      type: object
+      required: [summary, suggestions]
+      properties:
+        summary: { type: string }
+        suggestions:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ImprovementSuggestion'
+
+    PerVariationScore:
+      type: object
+      required: [variationRef, score]
+      properties:
+        variationRef: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        notes: { type: string }
+
+    ScoreCriterion:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        score: { type: number, minimum: 0, maximum: 100 }
+        notes: { type: string }
+
+    DesignReviewScore:
+      type: object
+      required: [summary, overallScore]
+      properties:
+        summary: { type: string }
+        overallScore: { type: number, minimum: 0, maximum: 100 }
+        perVariation:
+          type: array
+          items:
+            $ref: '#/components/schemas/PerVariationScore'
+        criteria:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreCriterion'
+        notes:
+          type: array
+          items: { type: string }
+
+    DesignReviewCompletedContext:
+      type: object
+      description: Expected Shared Context keys after completed stub run
+      required: [qualityReview, improvementSuggestions, designReviewScore]
+      properties:
+        qualityReview:
+          $ref: '#/components/schemas/QualityReview'
+        improvementSuggestions:
+          $ref: '#/components/schemas/ImprovementSuggestions'
+        designReviewScore:
+          $ref: '#/components/schemas/DesignReviewScore'
+
+    SeededCatalogCodes:
+      type: object
+      description: Idempotent seed codes
+      properties:
+        workflowCode:
+          type: string
+          enum: [kids-fashion-design-review]
+        agentCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-quality-reviewer
+              - fashion-improvement-suggester
+              - fashion-design-scorer
+        promptCodes:
+          type: array
+          items:
+            type: string
+            enum:
+              - fashion-quality-reviewer-prompt
+              - fashion-improvement-suggester-prompt
+              - fashion-design-scorer-prompt
+        toolRefs:
+          type: object
+          properties:
+            fashion-design-scorer:
+              type: array
+              items: { type: string, enum: [object-storage] }

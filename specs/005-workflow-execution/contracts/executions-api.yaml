@@ -1,0 +1,215 @@
+openapi: 3.0.3
+info:
+  title: Workflow Execution API
+  version: 1.0.0
+paths:
+  /api/v1/workflows/{id}/execute:
+    post:
+      tags: [Executions]
+      summary: Start Execution from published Workflow
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Workflow not found / not published }
+        '422': { description: Invalid definition or agents }
+  /api/v1/executions:
+    post:
+      tags: [Executions]
+      summary: Start Execution (collection create)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExecutionRequest'
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+    get:
+      tags: [Executions]
+      summary: List Executions
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: workflowId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: startedBy
+          in: query
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated list
+  /api/v1/executions/{id}:
+    get:
+      tags: [Executions]
+      summary: Get Execution
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Execution detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Execution'
+        '404': { description: Not found }
+  /api/v1/executions/{id}/steps:
+    get:
+      tags: [Executions]
+      summary: List Execution steps
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Steps
+  /api/v1/executions/{id}/steps/{stepId}:
+    get:
+      tags: [Executions]
+      summary: Get one step
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: stepId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Step detail
+        '404': { description: Not found }
+  /api/v1/executions/{id}/cancel:
+    post:
+      tags: [Executions]
+      summary: Cancel pending/running Execution
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Cancelled
+        '409': { description: Not cancellable }
+  /api/v1/executions/{id}/retry:
+    post:
+      tags: [Executions]
+      summary: Retry failed Execution
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Retry enqueued
+        '409': { description: Not failed }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ExecuteWorkflowRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          nullable: true
+        input:
+          type: object
+          additionalProperties: true
+          default: {}
+    CreateExecutionRequest:
+      allOf:
+        - $ref: '#/components/schemas/ExecuteWorkflowRequest'
+        - type: object
+          required: [workflowId]
+          properties:
+            workflowId:
+              type: string
+              format: uuid
+    Execution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workflowId: { type: string, format: uuid }
+        workflowCode: { type: string }
+        workflowVersion: { type: integer }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        input: { type: object }
+        context: { type: object }
+        error: { type: object, nullable: true }
+        startedBy: { type: string, format: uuid, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ExecutionStep:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        executionId: { type: string, format: uuid }
+        nodeId: { type: string }
+        agentCode: { type: string }
+        agentVersion: { type: integer }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled, retrying]
+        attempt: { type: integer }
+        maxRetries: { type: integer }
+        input: { type: object, nullable: true }
+        output: { type: object, nullable: true }
+        error: { type: object, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }

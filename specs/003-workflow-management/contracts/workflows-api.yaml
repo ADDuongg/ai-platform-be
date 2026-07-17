@@ -1,0 +1,179 @@
+openapi: 3.0.3
+info:
+  title: AI Platform — Workflow Management API
+  version: 1.0.0
+  description: |
+    Workflow catalog registry for Phase 1. Designers/admins mutate; operators/viewers read published only.
+paths:
+  /api/v1/workflows:
+    get:
+      operationId: listWorkflows
+      summary: List Workflows
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [draft, published, archived] }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200': { description: Paginated workflow list }
+    post:
+      operationId: createWorkflow
+      summary: Create draft Workflow
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateWorkflowRequest' }
+      responses:
+        '201': { description: Created }
+        '409': { description: Code conflict }
+  /api/v1/workflows/{id}:
+    get:
+      operationId: getWorkflow
+      summary: Get Workflow by id
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200': { description: Workflow }
+        '404': { description: Not found }
+    patch:
+      operationId: updateWorkflow
+      summary: Update metadata or draft definition
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateWorkflowRequest' }
+      responses:
+        '200': { description: Updated }
+    delete:
+      operationId: deleteWorkflow
+      summary: Soft-delete (archive) Workflow
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200': { description: Archived }
+  /api/v1/workflows/{id}/publish:
+    post:
+      operationId: publishWorkflow
+      summary: Publish current draft version
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200': { description: Published }
+  /api/v1/workflows/{id}/clone:
+    post:
+      operationId: cloneWorkflow
+      summary: Clone into new draft Workflow
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CloneWorkflowRequest' }
+      responses:
+        '201': { description: Cloned draft }
+  /api/v1/workflows/{id}/versions:
+    get:
+      operationId: listWorkflowVersions
+      summary: List versions
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200': { description: Version list }
+    post:
+      operationId: createWorkflowVersion
+      summary: Create draft version from published
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                changelog: { type: string }
+      responses:
+        '201': { description: Draft version created }
+  /api/v1/workflows/{id}/versions/{version}:
+    get:
+      operationId: getWorkflowVersion
+      summary: Get specific version
+      tags: [Workflows]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: Version detail }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkflowId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    CreateWorkflowRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        definition: { type: object }
+        changelog: { type: string }
+    UpdateWorkflowRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        tags: { type: array, items: { type: string } }
+        definition: { type: object }
+        changelog: { type: string }
+    CloneWorkflowRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        version: { type: integer, minimum: 1 }

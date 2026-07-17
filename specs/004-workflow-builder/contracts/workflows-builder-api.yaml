@@ -1,0 +1,244 @@
+openapi: 3.0.3
+info:
+  title: AI Platform — Workflow Builder API
+  version: 1.0.0
+  description: |
+    Graph mutation APIs for draft Workflow definitions. Extends Workflow Management.
+paths:
+  /api/v1/workflows/{id}/definition:
+    get:
+      operationId: getWorkflowDefinition
+      summary: Get current draft or published definition
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200': { description: Definition snapshot }
+        '404': { description: Not found }
+    put:
+      operationId: replaceWorkflowDefinition
+      summary: Replace entire draft definition
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReplaceDefinitionRequest' }
+      responses:
+        '200': { description: Updated definition }
+        '400': { description: Validation / graph / agent error }
+        '409': { description: No draft version }
+  /api/v1/workflows/{id}/definition/validate:
+    post:
+      operationId: validateWorkflowDefinition
+      summary: Validate definition without persisting
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValidateDefinitionRequest' }
+      responses:
+        '200': { description: Validation result }
+  /api/v1/workflows/{id}/nodes:
+    post:
+      operationId: addWorkflowNode
+      summary: Add agent step to draft
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddNodeRequest' }
+      responses:
+        '201': { description: Updated definition }
+  /api/v1/workflows/{id}/nodes/{nodeId}:
+    patch:
+      operationId: updateWorkflowNode
+      summary: Update or replace agent on a draft node
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNodeRequest' }
+      responses:
+        '200': { description: Updated definition }
+    delete:
+      operationId: removeWorkflowNode
+      summary: Remove node and cascade edges
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Updated definition }
+  /api/v1/workflows/{id}/edges:
+    post:
+      operationId: addWorkflowEdge
+      summary: Connect two draft nodes
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddEdgeRequest' }
+      responses:
+        '201': { description: Updated definition }
+  /api/v1/workflows/{id}/edges/{edgeId}:
+    delete:
+      operationId: removeWorkflowEdge
+      summary: Remove a connection
+      tags: [Workflow Builder]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: edgeId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Updated definition }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkflowId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    WorkflowNode:
+      type: object
+      required: [id, type, agentCode]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [agent] }
+        agentCode: { type: string }
+        agentVersion: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+        position:
+          type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+        inputMapping: { type: object, additionalProperties: true }
+        outputMapping: { type: object, additionalProperties: true }
+        timeoutMs: { type: integer, nullable: true }
+        maxRetries: { type: integer, nullable: true }
+        config: { type: object, additionalProperties: true }
+    WorkflowEdge:
+      type: object
+      required: [id, from, to]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+        condition: { type: 'null' }
+    WorkflowDefinition:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowEdge' }
+        variables: { type: object, additionalProperties: true }
+        policies: { type: object, additionalProperties: true }
+    AddNodeRequest:
+      type: object
+      required: [agentCode]
+      properties:
+        id: { type: string }
+        agentCode: { type: string }
+        agentVersion: { type: integer }
+        label: { type: string }
+        position:
+          type: object
+          properties:
+            x: { type: number }
+            y: { type: number }
+        inputMapping: { type: object }
+        outputMapping: { type: object }
+        timeoutMs: { type: integer }
+        maxRetries: { type: integer }
+        config: { type: object }
+    UpdateNodeRequest:
+      type: object
+      properties:
+        agentCode: { type: string }
+        agentVersion: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+        position:
+          type: object
+          nullable: true
+          properties:
+            x: { type: number }
+            y: { type: number }
+        inputMapping: { type: object }
+        outputMapping: { type: object }
+        timeoutMs: { type: integer, nullable: true }
+        maxRetries: { type: integer, nullable: true }
+        config: { type: object }
+        variables: { type: object }
+        policies: { type: object }
+    AddEdgeRequest:
+      type: object
+      required: [from, to]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+    ReplaceDefinitionRequest:
+      type: object
+      required: [definition]
+      properties:
+        definition: { $ref: '#/components/schemas/WorkflowDefinition' }
+        changelog: { type: string }
+    ValidateDefinitionRequest:
+      type: object
+      properties:
+        definition: { $ref: '#/components/schemas/WorkflowDefinition' }
+    ValidationResult:
+      type: object
+      required: [valid]
+      properties:
+        valid: { type: boolean }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              message: { type: string }
+              details: { type: object }

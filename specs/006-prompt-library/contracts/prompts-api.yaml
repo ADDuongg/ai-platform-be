@@ -1,0 +1,605 @@
+openapi: 3.0.3
+info:
+  title: AI Platform — Prompt Library API
+  version: 1.0.0
+  description: >
+    Prompt catalog registry for Phase 1. Admins mutate; non-admins read published Prompts only
+    (including enabled=false). FE typed contracts: `types.ts`, `interfaces.ts` (`PromptsApiClient`).
+    Runtime responses wrapped as `{ success, data, meta }` / `{ success: false, error, timestamp, path }`.
+    Agent promptRef assignment is validated via Agents APIs using Prompts read service (no SQL FK).
+servers:
+  - url: /api/v1
+tags:
+  - name: Prompts
+paths:
+  /prompts:
+    get:
+      tags: [Prompts]
+      summary: List Prompts
+      operationId: listPrompts
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/PromptStatus'
+          description: Admins may filter any status; non-admins always constrained to published
+        - name: category
+          in: query
+          schema:
+            type: string
+            maxLength: 64
+        - name: tag
+          in: query
+          schema:
+            type: string
+          description: Filter prompts that include this tag
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated prompt list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Prompts]
+      summary: Register draft Prompt
+      operationId: createPrompt
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `prompts:create`. Content (template/messages) MAY be empty at create;
+        publish later requires usable content.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptRequest'
+      responses:
+        '201':
+          description: Draft prompt created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/by-code/{code}:
+    get:
+      tags: [Prompts]
+      summary: Get Prompt by code
+      operationId: getPromptByCode
+      security:
+        - bearerAuth: []
+      description: >
+        Resolves to the current active Prompt with this code (ignores archived rows).
+        Non-admins only succeed for published Prompts.
+      parameters:
+        - $ref: '#/components/parameters/PromptCode'
+      responses:
+        '200':
+          description: Prompt detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /prompts/{id}:
+    get:
+      tags: [Prompts]
+      summary: Get Prompt by id
+      operationId: getPrompt
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Prompt detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Prompts]
+      summary: Update Prompt metadata or draft version content
+      operationId: updatePrompt
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:update`. Published version content is immutable.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePromptRequest'
+      responses:
+        '200':
+          description: Updated prompt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [Prompts]
+      summary: Soft-delete (archive) Prompt
+      operationId: deletePrompt
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `prompts:delete`. Sets status=archived and deleted_at.
+        After archive, the same code MAY be reused by a new Prompt.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /prompts/{id}/publish:
+    post:
+      tags: [Prompts]
+      summary: Publish current draft version
+      operationId: publishPrompt
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `prompts:publish`. Rejects empty content
+        (neither non-empty template nor non-empty messages).
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/{id}/enable:
+    post:
+      tags: [Prompts]
+      summary: Enable Prompt (`enabled=true`)
+      operationId: enablePrompt
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:update`. Rejected when Prompt is archived.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /prompts/{id}/disable:
+    post:
+      tags: [Prompts]
+      summary: Disable Prompt (`enabled=false`)
+      operationId: disablePrompt
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `prompts:update`. Does not change lifecycle status.
+        Idempotent when already disabled. Blocks new Agent assignment.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /prompts/{id}/versions:
+    get:
+      tags: [Prompts]
+      summary: List Prompt versions
+      operationId: listPromptVersions
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Version list (non-admins see published versions only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersionListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Prompts]
+      summary: Create new draft version from current published
+      operationId: createPromptVersion
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:update`. Prompt status stays published.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePromptVersionRequest'
+      responses:
+        '201':
+          description: Draft version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/{id}/versions/{version}:
+    get:
+      tags: [Prompts]
+      summary: Get specific Prompt version
+      operationId: getPromptVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+        - name: version
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Version detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    PromptId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PromptCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+        pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+  schemas:
+    PromptStatus:
+      type: string
+      enum: [draft, published, archived]
+    PromptVersionStatus:
+      type: string
+      enum: [draft, published]
+    PromptMessageRole:
+      type: string
+      enum: [system, user, assistant]
+    PromptMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          $ref: '#/components/schemas/PromptMessageRole'
+        content:
+          type: string
+    CreatePromptRequest:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          maxLength: 64
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+        category:
+          type: string
+          maxLength: 64
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        template:
+          type: string
+          nullable: true
+          description: Optional at create; may be empty
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/PromptMessage'
+          description: Optional at create; may be empty
+        variablesSchema:
+          type: object
+          additionalProperties: true
+        modelHints:
+          type: object
+          additionalProperties: true
+        changelog:
+          type: string
+    UpdatePromptRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+        category:
+          type: string
+          maxLength: 64
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        template:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/PromptMessage'
+        variablesSchema:
+          type: object
+          additionalProperties: true
+        modelHints:
+          type: object
+          additionalProperties: true
+        changelog:
+          type: string
+    CreatePromptVersionRequest:
+      type: object
+      properties:
+        changelog:
+          type: string
+    PromptVersionSummary:
+      type: object
+      properties:
+        version:
+          type: integer
+        status:
+          $ref: '#/components/schemas/PromptVersionStatus'
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+    PromptResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          $ref: '#/components/schemas/PromptStatus'
+        enabled:
+          type: boolean
+        currentVersion:
+          type: integer
+          nullable: true
+        draftVersion:
+          type: integer
+          nullable: true
+          description: Present for admins when a parallel draft version exists
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PromptListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptResponse'
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+    PromptVersionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        promptId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          $ref: '#/components/schemas/PromptVersionStatus'
+        template:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/PromptMessage'
+        variablesSchema:
+          type: object
+          additionalProperties: true
+        modelHints:
+          type: object
+          additionalProperties: true
+        changelog:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    PromptVersionListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptVersionResponse'
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+  responses:
+    BadRequest:
+      description: Validation error (e.g. empty content on publish, oversized payload)
+    Unauthorized:
+      description: Missing/invalid credentials (401)
+    Forbidden:
+      description: Authenticated but missing permission (403)
+    NotFound:
+      description: Resource not found (also used to hide drafts from non-admins)
+    Conflict:
+      description: Duplicate active code, immutable version, or draft version already exists
