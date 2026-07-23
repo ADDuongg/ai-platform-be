@@ -43,6 +43,9 @@ export const PERMISSIONS = {
     CANCEL: 'executions:cancel',
     RETRY: 'executions:retry',
   },
+  AUDIT: {
+    READ: 'audit:read',
+  },
 } as const;
 
 type PermissionValues<T> =

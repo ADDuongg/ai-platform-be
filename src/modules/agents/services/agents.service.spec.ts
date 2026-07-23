@@ -3,6 +3,8 @@ import { HttpStatus } from '@nestjs/common';
 import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+import { LlmCatalogService } from '@modules/llm/services/llm-catalog.service';
 import { PromptsService } from '@modules/prompts/services/prompts.service';
 import { ToolsService } from '@modules/tools/services/tools.service';
 
@@ -19,6 +21,8 @@ describe('AgentsService', () => {
   let agentVersionsRepository: jest.Mocked<AgentVersionsRepository>;
   let promptsService: jest.Mocked<PromptsService>;
   let toolsService: jest.Mocked<ToolsService>;
+  let llmCatalogService: jest.Mocked<LlmCatalogService>;
+  let auditLogService: jest.Mocked<AuditLogService>;
 
   const adminPermissions = [
     PERMISSIONS.AGENTS.READ,
@@ -96,11 +100,21 @@ describe('AgentsService', () => {
       assertAssignableByCodes: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<ToolsService>;
 
+    llmCatalogService = {
+      assertValidProviderModel: jest.fn(),
+    } as unknown as jest.Mocked<LlmCatalogService>;
+
+    auditLogService = {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<AuditLogService>;
+
     service = new AgentsService(
       agentsRepository,
       agentVersionsRepository,
       promptsService,
       toolsService,
+      llmCatalogService,
+      auditLogService,
     );
   });
 
@@ -162,6 +176,29 @@ describe('AgentsService', () => {
       await expect(
         service.update('agent-1', { inputSchema: { type: 'object', properties: {} } }),
       ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: ERROR_CODES.AGENT_NO_DRAFT_TO_PUBLISH }),
+      });
+    });
+  });
+
+  describe('publish', () => {
+    it('rejects publish when no draft version exists', async () => {
+      agentsRepository.findById.mockResolvedValue(publishedAgent);
+      agentsRepository.withTransaction.mockImplementation(async (work) => {
+        const agentRepo = {
+          findOne: jest.fn().mockResolvedValue(publishedAgent),
+        };
+        const versionRepo = {
+          findOne: jest.fn().mockResolvedValue(null),
+        };
+        const fakeManager = {
+          getRepository: (entity: unknown) =>
+            entity === AgentEntity ? agentRepo : versionRepo,
+        };
+        return work(fakeManager as never);
+      });
+
+      await expect(service.publish('agent-1', 'user-1')).rejects.toMatchObject({
         response: expect.objectContaining({ code: ERROR_CODES.AGENT_NO_DRAFT_TO_PUBLISH }),
       });
     });

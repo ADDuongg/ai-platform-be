@@ -121,7 +121,7 @@ function walkAndFilterReferences(
 ): void {
   if (node == null) return;
   if (Array.isArray(node)) {
-    if (keyHint === 'references') {
+    if (keyHint === 'references' || keyHint === 'evidence') {
       const filtered = node.filter((item) => {
         if (!item || typeof item !== 'object' || Array.isArray(item)) {
           return allowedUrls.size > 0; // non-object refs: drop if no allowlist

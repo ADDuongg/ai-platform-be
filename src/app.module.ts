@@ -13,9 +13,11 @@ import { QueueModule } from '@infrastructure/queue';
 import { RedisModule } from '@infrastructure/redis';
 import { AuthModule } from '@modules/auth/auth.module';
 import { AgentsModule } from '@modules/agents/agents.module';
+import { AuditModule } from '@modules/audit/audit.module';
 import { PromptsModule } from '@modules/prompts/prompts.module';
 import { ToolsModule } from '@modules/tools/tools.module';
 import { HealthModule } from '@modules/health/health.module';
+import { LlmModule } from '@modules/llm/llm.module';
 import { UsersModule } from '@modules/users/users.module';
 import { WorkflowsModule } from '@modules/workflows/workflows.module';
 import { ExecutionsModule } from '@modules/executions/executions.module';
@@ -57,9 +59,11 @@ import { ExecutionsModule } from '@modules/executions/executions.module';
     QueueModule,
     AuthModule,
     UsersModule,
+    AuditModule,
     AgentsModule,
     PromptsModule,
     ToolsModule,
+    LlmModule,
     WorkflowsModule,
     ExecutionsModule,
     HealthModule,

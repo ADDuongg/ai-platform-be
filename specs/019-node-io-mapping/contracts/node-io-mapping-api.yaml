@@ -1,0 +1,427 @@
+openapi: 3.0.3
+info:
+  title: Builder Node I/O Mapping API
+  version: 1.0.0
+  description: |
+    FE contract for editing Workflow node `inputMapping` / `outputMapping` on drafts.
+
+    Semantics (Execution engine — do not reverse in UI):
+    - inputMapping: mappedInput[left] = context[right]
+    - outputMapping: nextContext[left] = agentOutput[right]
+
+    Path values are plain or dotted strings (e.g. `season`, `trendFindings.summary`).
+    Do **not** use `$.input.*` JSONPath prefixes — the engine does not strip them.
+
+    Base path: `/api/v1`. Bearer JWT required.
+servers:
+  - url: /api/v1
+tags:
+  - name: Workflow Builder
+  - name: Workflows
+paths:
+  /workflows/{id}/definition:
+    get:
+      tags: [Workflow Builder]
+      summary: Get Workflow definition
+      operationId: getWorkflowDefinition
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:read`. Mutate roles typically receive draft;
+        read-only roles receive published snapshot when available.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200':
+          description: Definition snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Workflow Builder]
+      summary: Replace entire draft definition
+      operationId: replaceWorkflowDefinition
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:update`. Alternate save path if Builder already
+        replaces the full definition (include all nodes with mappings).
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceWorkflowDefinitionRequest'
+      responses:
+        '200':
+          description: Replaced draft definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No draft version / conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /workflows/{id}/nodes/{nodeId}:
+    patch:
+      tags: [Workflow Builder]
+      summary: Update draft node (I/O mapping)
+      operationId: updateWorkflowNode
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:update`. Partial update: omitted fields keep prior values.
+        Send `inputMapping: {}` or `outputMapping: {}` to clear a map.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkflowNodeRequest'
+            examples:
+              setMappings:
+                summary: Set input and output maps
+                value:
+                  inputMapping:
+                    season: season
+                    category: category
+                    market: market
+                  outputMapping:
+                    trendFindings: trendFindings
+              clearInput:
+                summary: Clear input mapping only
+                value:
+                  inputMapping: {}
+      responses:
+        '200':
+          description: Updated draft definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workflows/{id}/publish:
+    post:
+      tags: [Workflows]
+      summary: Publish draft Workflow
+      operationId: publishWorkflow
+      security:
+        - bearerAuth: []
+      description: Requires `workflows:publish`. Published nodes carry mappings into Execution.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200':
+          description: Published workflow summary/detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No draft to publish
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    WorkflowId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing/invalid token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: Insufficient permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Workflow or node not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          nullable: true
+    ErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+        meta:
+          type: object
+          additionalProperties: true
+
+    WorkflowNodePosition:
+      type: object
+      required: [x, y]
+      properties:
+        x: { type: number }
+        y: { type: number }
+
+    NodeIoMapping:
+      type: object
+      description: |
+        Map of left-key → path string (preferred). Engine may also store non-string
+        literals; FE MVP editors should author strings only.
+      additionalProperties: true
+      example:
+        season: season
+        category: category
+
+    WorkflowNode:
+      type: object
+      required: [id, type, agentCode]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [agent]
+        agentCode: { type: string }
+        agentVersion:
+          type: integer
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        position:
+          allOf:
+            - $ref: '#/components/schemas/WorkflowNodePosition'
+          nullable: true
+        inputMapping:
+          $ref: '#/components/schemas/NodeIoMapping'
+        outputMapping:
+          $ref: '#/components/schemas/NodeIoMapping'
+        timeoutMs:
+          type: integer
+          nullable: true
+        maxRetries:
+          type: integer
+          nullable: true
+        config:
+          type: object
+          additionalProperties: true
+
+    WorkflowEdge:
+      type: object
+      required: [id, from, to]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+        condition:
+          nullable: true
+
+    WorkflowDefinition:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowEdge'
+        variables:
+          type: object
+          additionalProperties: true
+        policies:
+          type: object
+          additionalProperties: true
+
+    WorkflowDefinitionSnapshot:
+      type: object
+      required: [workflowId, version, versionStatus, definition]
+      properties:
+        workflowId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        versionStatus:
+          type: string
+          description: Nest field name (not `status`)
+        definition:
+          $ref: '#/components/schemas/WorkflowDefinition'
+
+    WorkflowDefinitionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/WorkflowDefinitionSnapshot'
+        meta:
+          type: object
+          additionalProperties: true
+
+    UpdateWorkflowNodeRequest:
+      type: object
+      properties:
+        agentCode: { type: string }
+        agentVersion:
+          type: integer
+          nullable: true
+        label:
+          type: string
+          nullable: true
+        position:
+          allOf:
+            - $ref: '#/components/schemas/WorkflowNodePosition'
+          nullable: true
+        inputMapping:
+          $ref: '#/components/schemas/NodeIoMapping'
+        outputMapping:
+          $ref: '#/components/schemas/NodeIoMapping'
+        timeoutMs:
+          type: integer
+          nullable: true
+        maxRetries:
+          type: integer
+          nullable: true
+        config:
+          type: object
+          additionalProperties: true
+
+    ReplaceWorkflowDefinitionRequest:
+      type: object
+      required: [definition]
+      properties:
+        definition:
+          $ref: '#/components/schemas/WorkflowDefinition'
+        changelog:
+          type: string
+
+    WorkflowStatus:
+      type: string
+      enum: [draft, published, archived]
+
+    WorkflowDetail:
+      type: object
+      required: [id, code, name, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code: { type: string }
+        name: { type: string }
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items: { type: string }
+        status:
+          $ref: '#/components/schemas/WorkflowStatus'
+        currentVersion:
+          type: integer
+          nullable: true
+        draftVersion:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    WorkflowDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/WorkflowDetail'
+        meta:
+          type: object
+          additionalProperties: true

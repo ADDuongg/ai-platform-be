@@ -74,39 +74,52 @@ export class AgentsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAgentDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<AgentResponseDto> {
-    return this.agentsService.update(id, dto);
+    return this.agentsService.update(id, dto, user.sub);
   }
 
   @Delete(':id')
   @Permissions(PERMISSIONS.AGENTS.DELETE)
   @ApiOperation({ summary: 'Soft-delete (archive) Agent' })
-  async softDelete(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
-    return this.agentsService.softDelete(id);
+  async softDelete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.agentsService.softDelete(id, user.sub);
   }
 
   @Post(':id/publish')
   @Permissions(PERMISSIONS.AGENTS.PUBLISH)
   @ApiOperation({ summary: 'Publish current draft version' })
   @ApiOkResponse({ type: AgentResponseDto })
-  async publish(@Param('id', ParseUUIDPipe) id: string): Promise<AgentResponseDto> {
-    return this.agentsService.publish(id);
+  async publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<AgentResponseDto> {
+    return this.agentsService.publish(id, user.sub);
   }
 
   @Post(':id/enable')
   @Permissions(PERMISSIONS.AGENTS.UPDATE)
   @ApiOperation({ summary: 'Enable Agent' })
   @ApiOkResponse({ type: AgentResponseDto })
-  async enable(@Param('id', ParseUUIDPipe) id: string): Promise<AgentResponseDto> {
-    return this.agentsService.enable(id);
+  async enable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<AgentResponseDto> {
+    return this.agentsService.enable(id, user.sub);
   }
 
   @Post(':id/disable')
   @Permissions(PERMISSIONS.AGENTS.UPDATE)
   @ApiOperation({ summary: 'Disable Agent' })
   @ApiOkResponse({ type: AgentResponseDto })
-  async disable(@Param('id', ParseUUIDPipe) id: string): Promise<AgentResponseDto> {
-    return this.agentsService.disable(id);
+  async disable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<AgentResponseDto> {
+    return this.agentsService.disable(id, user.sub);
   }
 
   @Get(':id/versions')

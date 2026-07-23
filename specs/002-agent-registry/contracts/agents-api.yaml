@@ -374,7 +374,23 @@ components:
           additionalProperties: true
         config:
           type: object
+          description: >
+            Free-form agent version config. Live LLM runner reads `provider` and `model`
+            (see GET /api/v1/llm/providers for allowlist). Other keys (e.g. temperature) are allowed.
           additionalProperties: true
+          properties:
+            provider:
+              type: string
+              description: LLM provider id (openai | anthropic | ollama | gemini)
+              enum: [openai, anthropic, ollama, gemini]
+              example: openai
+            model:
+              type: string
+              description: Model id for the selected provider (must be in catalog allowlist)
+              example: gpt-4o
+            temperature:
+              type: number
+              example: 0.2
         timeoutMs:
           type: integer
           minimum: 1
@@ -408,7 +424,23 @@ components:
           additionalProperties: true
         config:
           type: object
+          description: >
+            Replaces draft version configJson entirely (not a deep merge).
+            Live LLM runner reads `provider` and `model` (see GET /api/v1/llm/providers).
           additionalProperties: true
+          properties:
+            provider:
+              type: string
+              description: LLM provider id (openai | anthropic | ollama | gemini)
+              enum: [openai, anthropic, ollama, gemini]
+              example: anthropic
+            model:
+              type: string
+              description: Model id for the selected provider (must be in catalog allowlist)
+              example: claude-sonnet-4-20250514
+            temperature:
+              type: number
+              example: 0.2
         timeoutMs:
           type: integer
           minimum: 1

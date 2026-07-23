@@ -1,0 +1,624 @@
+openapi: 3.0.3
+info:
+  title: Workflow Start Inputs + Builder I/O Mapping API
+  version: 1.0.0
+  description: |
+    FE contract pack for dynamic Workflow start forms and Builder policies editing.
+
+    **No new Nest routes for Phase A.1** — documents existing Workflow Management,
+    Workflow Builder, and Execution endpoints with a typed `policies` shape:
+
+    - `policies.requiredInputs: string[]` — BE enforces at Execution start
+    - `policies.inputSchema` — optional FE UI metadata (Phase A.2+); BE persists opaque JSON
+
+    Typical FE flows:
+    1. Builder: GET definition → edit `requiredInputs` (+ `inputSchema`) → PUT definition → publish
+    2. Modules Start a run: resolve workflow id (list/match `code`) → GET definition →
+       render form from `requiredInputs` → POST execute with `{ input: { ... } }`
+    3. Phase B: PATCH node `inputMapping` / `outputMapping`
+
+    Related: `specs/003-workflow-management`, `specs/004-workflow-builder`, `specs/005-workflow-execution`.
+servers:
+  - url: /api/v1
+tags:
+  - name: Workflows
+  - name: Workflow Builder
+  - name: Executions
+paths:
+  /workflows:
+    get:
+      tags: [Workflows]
+      summary: List Workflows (resolve id by `code`)
+      operationId: listWorkflows
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:read`. Modules operators typically filter `status=published`
+        and match `data[].code` to a configured `workflowCode` (no by-code route in MVP).
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, published, archived]
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated workflows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /workflows/{id}:
+    get:
+      tags: [Workflows]
+      summary: Get Workflow by id
+      operationId: getWorkflow
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200':
+          description: Workflow summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workflows/{id}/publish:
+    post:
+      tags: [Workflows]
+      summary: Publish current draft version
+      operationId: publishWorkflow
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:publish`. After publish, Modules Start a run must read
+        the published definition to pick up new `requiredInputs` / `inputSchema`.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200':
+          description: Published workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No draft to publish / invalid state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /workflows/{id}/definition:
+    get:
+      tags: [Workflow Builder]
+      summary: Get Workflow definition (draft or published)
+      operationId: getWorkflowDefinition
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:read`. Mutate roles typically receive the draft;
+        read-only operators receive the published snapshot when applicable.
+        FE must use the published definition for Modules Start a run.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      responses:
+        '200':
+          description: Definition snapshot including `policies`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+              examples:
+                trendResearchPolicies:
+                  summary: Kids Fashion Trend Research-style policies
+                  value:
+                    success: true
+                    data:
+                      workflowId: 00000000-0000-4000-8000-000000000001
+                      version: 1
+                      versionStatus: published
+                      definition:
+                        nodes: []
+                        edges: []
+                        variables: {}
+                        policies:
+                          requiredInputs: [season, category, market]
+                          inputSchema:
+                            season:
+                              label: Season
+                              widget: text
+                            category:
+                              label: Category
+                              widget: select
+                              options: [apparel, accessories]
+                    meta: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Workflow Builder]
+      summary: Replace entire draft definition (incl. policies)
+      operationId: replaceWorkflowDefinition
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:update`. Send the **full** definition. When editing start
+        fields, update `definition.policies.requiredInputs` (and optionally
+        `inputSchema`) while preserving nodes/edges/variables and other policy keys.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceDefinitionRequest'
+            examples:
+              setRequiredInputs:
+                summary: Phase A.1 — text-only required keys
+                value:
+                  definition:
+                    nodes: []
+                    edges: []
+                    variables: {}
+                    policies:
+                      requiredInputs: [season, category, market, productLine]
+                  changelog: Add productLine start input
+              withInputSchema:
+                summary: Phase A.2 — widgets metadata
+                value:
+                  definition:
+                    nodes: []
+                    edges: []
+                    variables: {}
+                    policies:
+                      requiredInputs: [season, category, market]
+                      inputSchema:
+                        season:
+                          label: Season
+                          widget: text
+                          placeholder: SS26
+                          default: SS26
+                        category:
+                          label: Category
+                          widget: select
+                          options: [apparel, accessories]
+                          default: apparel
+                        market:
+                          label: Market
+                          widget: text
+                          default: US
+      responses:
+        '200':
+          description: Updated draft definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No draft version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /workflows/{id}/nodes/{nodeId}:
+    patch:
+      tags: [Workflow Builder]
+      summary: Update draft node (Phase B — I/O mapping)
+      operationId: updateWorkflowNode
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `workflows:update`. Use to set `inputMapping` / `outputMapping`
+        after adding a start field that a step must consume. Does not block A.1/A.2.
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+        - name: nodeId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNodeRequest'
+            example:
+              inputMapping:
+                season: season
+                category: category
+                market: market
+              outputMapping:
+                trendFindings: trendFindings
+      responses:
+        '200':
+          description: Updated definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /workflows/{id}/execute:
+    post:
+      tags: [Executions]
+      summary: Start Execution from published Workflow
+      operationId: executeWorkflow
+      security:
+        - bearerAuth: []
+      description: |
+        Requires execute permission. `input` keys should satisfy published
+        `policies.requiredInputs`. Missing/blank required keys → validation error
+        (existing platform behavior).
+      parameters:
+        - $ref: '#/components/parameters/WorkflowId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecuteWorkflowRequest'
+            example:
+              input:
+                season: SS26
+                category: apparel
+                market: US
+      responses:
+        '201':
+          description: Execution created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionEnvelope'
+        '400':
+          description: Validation (e.g. requiredInputs missing/blank)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid definition or agents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    WorkflowId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    StartInputWidget:
+      type: string
+      description: FE-owned catalog; unknown → treat as text
+      enum: [text, textarea, select, date]
+    StartInputFieldSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        label: { type: string }
+        widget: { $ref: '#/components/schemas/StartInputWidget' }
+        options:
+          type: array
+          items: { type: string }
+          description: When widget = select
+        placeholder: { type: string }
+        default:
+          description: Prefill on Modules Start form (FE); does not bypass requiredInputs
+          nullable: true
+          oneOf:
+            - { type: string }
+            - { type: number }
+            - { type: boolean }
+            - { type: 'null' }
+    WorkflowStartPolicies:
+      type: object
+      description: |
+        Start-form policies. Preserve other unknown policy keys on round-trip.
+      properties:
+        requiredInputs:
+          type: array
+          items: { type: string }
+          description: BE enforces non-blank at Execution start
+          example: [season, category, market]
+        inputSchema:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/StartInputFieldSchema'
+          description: Optional UI metadata keyed by field name (Phase A.2+)
+    WorkflowNodePosition:
+      type: object
+      required: [x, y]
+      properties:
+        x: { type: number }
+        y: { type: number }
+    WorkflowNode:
+      type: object
+      required: [id, type, agentCode]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [agent] }
+        agentCode: { type: string }
+        agentVersion: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+        position: { $ref: '#/components/schemas/WorkflowNodePosition' }
+        inputMapping:
+          type: object
+          additionalProperties: true
+        outputMapping:
+          type: object
+          additionalProperties: true
+        timeoutMs: { type: integer, nullable: true }
+        maxRetries: { type: integer, nullable: true }
+        config:
+          type: object
+          additionalProperties: true
+    WorkflowEdge:
+      type: object
+      required: [id, from, to]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+        condition: { type: 'null' }
+    WorkflowDefinition:
+      type: object
+      required: [nodes, edges]
+      properties:
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowEdge' }
+        variables:
+          type: object
+          additionalProperties: true
+        policies:
+          allOf:
+            - $ref: '#/components/schemas/WorkflowStartPolicies'
+          description: May include additional opaque keys
+    WorkflowSummary:
+      type: object
+      required: [id, code, name, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: kids-fashion-trend-research }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        status:
+          type: string
+          enum: [draft, published, archived]
+        currentVersion: { type: integer, nullable: true }
+        draftVersion: { type: integer, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    WorkflowDefinitionSnapshot:
+      type: object
+      required: [workflowId, version, versionStatus, definition]
+      properties:
+        workflowId: { type: string, format: uuid }
+        version: { type: integer }
+        versionStatus:
+          type: string
+          enum: [draft, published]
+          description: Nest response field (not `status`)
+        definition: { $ref: '#/components/schemas/WorkflowDefinition' }
+    ReplaceDefinitionRequest:
+      type: object
+      required: [definition]
+      properties:
+        definition: { $ref: '#/components/schemas/WorkflowDefinition' }
+        changelog: { type: string }
+    UpdateNodeRequest:
+      type: object
+      properties:
+        agentCode: { type: string }
+        agentVersion: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+        position:
+          allOf:
+            - $ref: '#/components/schemas/WorkflowNodePosition'
+          nullable: true
+        inputMapping:
+          type: object
+          additionalProperties: true
+        outputMapping:
+          type: object
+          additionalProperties: true
+        timeoutMs: { type: integer, nullable: true }
+        maxRetries: { type: integer, nullable: true }
+        config:
+          type: object
+          additionalProperties: true
+    ExecuteWorkflowRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          nullable: true
+        input:
+          type: object
+          additionalProperties: true
+          description: Keys should cover published requiredInputs
+          default: {}
+    ExecutionSummary:
+      type: object
+      required:
+        - id
+        - workflowId
+        - workflowCode
+        - workflowVersion
+        - status
+        - input
+        - context
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: string, format: uuid }
+        workflowId: { type: string, format: uuid }
+        workflowCode: { type: string }
+        workflowVersion: { type: integer }
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        input:
+          type: object
+          additionalProperties: true
+        context:
+          type: object
+          additionalProperties: true
+        error:
+          type: object
+          nullable: true
+          additionalProperties: true
+        startedBy: { type: string, format: uuid, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    PaginationMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+    WorkflowListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/WorkflowSummary' }
+        meta: { $ref: '#/components/schemas/PaginationMeta' }
+    WorkflowDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, example: true }
+        data: { $ref: '#/components/schemas/WorkflowSummary' }
+        meta:
+          type: object
+          additionalProperties: true
+    WorkflowDefinitionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, example: true }
+        data: { $ref: '#/components/schemas/WorkflowDefinitionSnapshot' }
+        meta:
+          type: object
+          additionalProperties: true
+    ExecutionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, example: true }
+        data: { $ref: '#/components/schemas/ExecutionSummary' }
+        meta:
+          type: object
+          additionalProperties: true
+    ErrorBody:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: {}
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error: { $ref: '#/components/schemas/ErrorBody' }
+        timestamp: { type: string, format: date-time }
+        path: { type: string }
+  responses:
+    BadRequest:
+      description: Bad request / validation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }

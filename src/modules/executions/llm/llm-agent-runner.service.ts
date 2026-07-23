@@ -10,8 +10,10 @@ import { PromptsService } from '@modules/prompts/services/prompts.service';
 import {
   DEFAULT_LLM_TIMEOUT_MS,
   DEFAULT_OLLAMA_MODEL,
-  LLM_CHAT_PROVIDER,
+  LIVE_LLM_PROVIDERS,
+  LLM_PROVIDER_REGISTRY,
   MAX_LLM_RESPONSE_BYTES,
+  type LlmProviderId,
 } from '../constants/executions.constants';
 import type { AgentRunner, AgentRunnerInvokeInput } from '../services/agent-runner.types';
 import {
@@ -27,7 +29,8 @@ import {
   collectAllowedUrlsFromEnrichment,
   sanitizeReferencesAgainstAllowlist,
 } from '../tools/reference-url.sanitizer';
-import type { LlmChatProvider } from './llm-chat.provider';
+import { ensureTrendEvidenceFromSearch } from '../tools/trend-evidence.util';
+import type { LlmProviderRegistry } from './llm-provider.registry';
 
 type ChatMessage = { role: string; content: string };
 
@@ -40,7 +43,7 @@ export class LlmAgentRunnerService implements AgentRunner {
     private readonly agentsRepository: AgentsRepository,
     private readonly agentVersionsRepository: AgentVersionsRepository,
     private readonly promptsService: PromptsService,
-    @Inject(LLM_CHAT_PROVIDER) private readonly chatProvider: LlmChatProvider,
+    @Inject(LLM_PROVIDER_REGISTRY) private readonly providerRegistry: LlmProviderRegistry,
     @Optional() private readonly toolInvoker?: ToolInvokerService,
   ) {}
 
@@ -85,10 +88,12 @@ export class LlmAgentRunnerService implements AgentRunner {
     );
 
     const runnerCfg = this.configService.get('agentRunner', { infer: true });
+    const providerId = this.resolveProvider(agentVersion.configJson, runnerCfg?.mode);
+    const chatProvider = this.providerRegistry.get(providerId);
     const model = this.resolveModel(
       agentVersion.configJson,
       promptVersion.modelHints,
-      runnerCfg?.defaultModel,
+      this.defaultModelForProvider(providerId, runnerCfg),
     );
     const timeoutMs = this.resolveTimeoutMs(
       agentVersion.timeoutMs,
@@ -97,7 +102,7 @@ export class LlmAgentRunnerService implements AgentRunner {
     );
 
     this.logger.log(
-      `LLM invoke provider=${this.chatProvider.id} agent=${params.agentCode} v${params.agentVersion} model=${model} timeoutMs=${timeoutMs}`,
+      `LLM invoke provider=${chatProvider.id} agent=${params.agentCode} v${params.agentVersion} model=${model} timeoutMs=${timeoutMs}`,
     );
     this.logger.log(`LLM rendered prompt:\n${JSON.stringify(messages, null, 2)}`);
 
@@ -110,7 +115,7 @@ export class LlmAgentRunnerService implements AgentRunner {
       );
     }
 
-    const rawContent = await this.chatProvider.chat({
+    const rawContent = await chatProvider.chat({
       model,
       messages,
       timeoutMs,
@@ -119,11 +124,13 @@ export class LlmAgentRunnerService implements AgentRunner {
       responseSchema,
     });
 
-    this.logger.log(`LLM raw response (${this.chatProvider.id}):\n${rawContent}`);
+    this.logger.log(`LLM raw response (${chatProvider.id}):\n${rawContent}`);
 
     assertResponseSize(rawContent, MAX_LLM_RESPONSE_BYTES);
     const parsed = parseModelJsonObject(rawContent);
     let output = coerceOutputAgainstSchema(parsed, agentVersion.outputSchema);
+    // Ollama structured output often omits optional nested keys (notes/evidence).
+    output = ensureTrendEvidenceFromSearch(output, enrichmentBundle);
 
     const allowedReferenceUrls = new Set([
       ...collectAllowedUrlsFromEnrichment(enrichmentBundle),
@@ -166,14 +173,45 @@ export class LlmAgentRunnerService implements AgentRunner {
     };
   }
 
+  private resolveProvider(configJson: Record<string, unknown>, runnerMode?: string): LlmProviderId {
+    const fromConfig = firstTrimmedString(configJson?.provider)?.toLowerCase();
+    if (fromConfig && isLiveProviderId(fromConfig)) {
+      return fromConfig;
+    }
+    if (runnerMode && isLiveProviderId(runnerMode)) {
+      return runnerMode;
+    }
+    return 'ollama';
+  }
+
   private resolveModel(
     configJson: Record<string, unknown>,
     modelHints: Record<string, unknown>,
-    envModel?: string,
+    providerDefault?: string,
   ): string {
     return (
-      firstTrimmedString(configJson?.model, modelHints?.model, envModel) ?? DEFAULT_OLLAMA_MODEL
+      firstTrimmedString(configJson?.model, modelHints?.model, providerDefault) ??
+      DEFAULT_OLLAMA_MODEL
     );
+  }
+
+  private defaultModelForProvider(
+    providerId: LlmProviderId,
+    runnerCfg?: AllConfigType['agentRunner'],
+  ): string {
+    if (!runnerCfg) {
+      return DEFAULT_OLLAMA_MODEL;
+    }
+    if (providerId === 'openai') {
+      return runnerCfg.openai?.model || runnerCfg.defaultModel || DEFAULT_OLLAMA_MODEL;
+    }
+    if (providerId === 'anthropic') {
+      return runnerCfg.anthropic?.model || runnerCfg.defaultModel || DEFAULT_OLLAMA_MODEL;
+    }
+    if (providerId === 'gemini') {
+      return runnerCfg.gemini?.model || runnerCfg.defaultModel || DEFAULT_OLLAMA_MODEL;
+    }
+    return runnerCfg.ollama?.model || runnerCfg.defaultModel || DEFAULT_OLLAMA_MODEL;
   }
 
   private resolveTemperature(
@@ -300,4 +338,8 @@ function firstNumber(...candidates: unknown[]): number | undefined {
     }
   }
   return undefined;
+}
+
+function isLiveProviderId(value: string): value is LlmProviderId {
+  return (LIVE_LLM_PROVIDERS as readonly string[]).includes(value);
 }

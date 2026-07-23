@@ -20,6 +20,12 @@ describe('ToolInvokerService', () => {
           mode: 'live',
           storageRoot: '.data/tool-storage',
           resultMaxBytes: 262_144,
+          flux: {
+            apiKey: '',
+            baseUrl: 'https://api.bfl.ai',
+            endpointPath: '/v1/flux-2-pro',
+            pollIntervalMs: 500,
+          },
         };
       }
       return undefined;
@@ -35,7 +41,10 @@ describe('ToolInvokerService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    const registry = new ToolAdapterRegistry([okAdapter, new ImageGenerationAdapter()]);
+    const registry = new ToolAdapterRegistry([
+      okAdapter,
+      new ImageGenerationAdapter(configService),
+    ]);
     invoker = new ToolInvokerService(toolsService as never, configService, registry);
   });
 

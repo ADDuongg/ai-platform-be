@@ -9,6 +9,7 @@ import {
   renderPromptTemplate,
 } from '../llm/llm-agent-runner.service';
 import type { LlmChatProvider } from '../llm/llm-chat.provider';
+import { LlmProviderRegistry } from '../llm/llm-provider.registry';
 import type { ToolInvokerService } from '../tools/tool-invoker.service';
 
 describe('LlmAgentRunnerService', () => {
@@ -32,7 +33,7 @@ describe('LlmAgentRunnerService', () => {
       required: ['trendFindings'],
       properties: { trendFindings: { type: 'object' } },
     },
-    configJson: {},
+    configJson: {} as Record<string, unknown>,
     timeoutMs: 60_000,
     maxRetries: 0,
   };
@@ -53,15 +54,24 @@ describe('LlmAgentRunnerService', () => {
   const promptsService = { resolvePublishedByCode: jest.fn() };
   const toolInvoker = { invokeAll: jest.fn() } as unknown as ToolInvokerService;
 
+  const defaultRunnerConfig = {
+    mode: 'ollama',
+    defaultModel: 'llama3.2',
+    timeoutMs: 120_000,
+    ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' },
+    openai: { apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    anthropic: {
+      apiKey: '',
+      baseUrl: 'https://api.anthropic.com',
+      model: 'claude-sonnet-4-20250514',
+    },
+    gemini: { apiKey: '', model: 'gemini-2.0-flash' },
+  };
+
   const configService = {
     get: jest.fn((key: string) => {
       if (key === 'agentRunner') {
-        return {
-          mode: 'ollama',
-          defaultModel: 'llama3.2',
-          timeoutMs: 120_000,
-          ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' },
-        };
+        return defaultRunnerConfig;
       }
       if (key === 'toolRuntime') {
         return { mode: 'stub', storageRoot: '.data/tool-storage', resultMaxBytes: 262_144 };
@@ -70,15 +80,20 @@ describe('LlmAgentRunnerService', () => {
     }),
   } as unknown as ConfigService<AllConfigType>;
 
-  const chatProvider: LlmChatProvider = {
+  const ollamaProvider: LlmChatProvider = {
     id: 'ollama',
     chat: jest.fn(),
   };
-
+  const openaiProvider: LlmChatProvider = {
+    id: 'openai',
+    chat: jest.fn(),
+  };
+  let providerRegistry: LlmProviderRegistry;
   let runner: LlmAgentRunnerService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    agentVersion.configJson = {};
     agentsRepository.findByCode.mockResolvedValue(agent);
     agentVersionsRepository.findByAgentAndVersion.mockResolvedValue(agentVersion);
     promptsService.resolvePublishedByCode.mockResolvedValue({
@@ -90,24 +105,20 @@ describe('LlmAgentRunnerService', () => {
     });
     (configService.get as jest.Mock).mockImplementation((key: string) => {
       if (key === 'agentRunner') {
-        return {
-          mode: 'ollama',
-          defaultModel: 'llama3.2',
-          timeoutMs: 120_000,
-          ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' },
-        };
+        return defaultRunnerConfig;
       }
       if (key === 'toolRuntime') {
         return { mode: 'stub', storageRoot: '.data/tool-storage', resultMaxBytes: 262_144 };
       }
       return undefined;
     });
+    providerRegistry = new LlmProviderRegistry([ollamaProvider, openaiProvider]);
     runner = new LlmAgentRunnerService(
       configService,
       agentsRepository as never,
       agentVersionsRepository as never,
       promptsService as never,
-      chatProvider,
+      providerRegistry,
       toolInvoker,
     );
   });
@@ -124,11 +135,16 @@ describe('LlmAgentRunnerService', () => {
     const payload = {
       trendFindings: { summary: 'live', trends: [{ name: 'A' }] },
     };
-    (chatProvider.chat as jest.Mock).mockResolvedValue(JSON.stringify(payload));
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(JSON.stringify(payload));
 
     const result = await runner.invoke(baseInvoke);
-    expect(result).toEqual(payload);
-    expect(chatProvider.chat).toHaveBeenCalledWith(
+    expect(result).toEqual({
+      trendFindings: {
+        summary: 'live',
+        trends: [{ name: 'A', notes: '', evidence: [] }],
+      },
+    });
+    expect(ollamaProvider.chat).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'llama3.2',
         jsonMode: true,
@@ -138,8 +154,58 @@ describe('LlmAgentRunnerService', () => {
     );
   });
 
+  it('backfills evidence from live web-search when LLM omits it', async () => {
+    (configService.get as jest.Mock).mockImplementation((key: string) => {
+      if (key === 'agentRunner') {
+        return defaultRunnerConfig;
+      }
+      if (key === 'toolRuntime') {
+        return { mode: 'live', storageRoot: '.data/tool-storage', resultMaxBytes: 262_144 };
+      }
+      return undefined;
+    });
+    (toolInvoker.invokeAll as jest.Mock).mockResolvedValue({
+      tools: [
+        {
+          code: 'web-search',
+          result: {
+            results: [
+              { title: 'Kids SS27', url: 'https://example.com/a', snippet: 'bright prints' },
+            ],
+          },
+        },
+      ],
+    });
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(
+      JSON.stringify({
+        trendFindings: {
+          summary: 'live',
+          trends: [{ name: 'Bold prints', confidence: 0.55 }],
+        },
+      }),
+    );
+
+    const result = await runner.invoke(baseInvoke);
+    const trends = (result.trendFindings as { trends: Array<Record<string, unknown>> }).trends;
+    expect(trends[0]?.evidence).toEqual([
+      { title: 'Kids SS27', url: 'https://example.com/a', quote: 'bright prints' },
+    ]);
+  });
+
+  it('routes to agent config.provider and config.model', async () => {
+    agentVersion.configJson = { provider: 'openai', model: 'gpt-4o' };
+    (openaiProvider.chat as jest.Mock).mockResolvedValue(
+      JSON.stringify({ trendFindings: { summary: 'openai', trends: [] } }),
+    );
+
+    await runner.invoke(baseInvoke);
+
+    expect(openaiProvider.chat).toHaveBeenCalledWith(expect.objectContaining({ model: 'gpt-4o' }));
+    expect(ollamaProvider.chat).not.toHaveBeenCalled();
+  });
+
   it('does not invoke tools when TOOL_RUNTIME=stub', async () => {
-    (chatProvider.chat as jest.Mock).mockResolvedValue(
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(
       JSON.stringify({ trendFindings: { summary: 'x', trends: [] } }),
     );
     await runner.invoke(baseInvoke);
@@ -149,19 +215,14 @@ describe('LlmAgentRunnerService', () => {
   it('enriches prompt with tool results when TOOL_RUNTIME=live', async () => {
     (configService.get as jest.Mock).mockImplementation((key: string) => {
       if (key === 'agentRunner') {
-        return {
-          mode: 'ollama',
-          defaultModel: 'llama3.2',
-          timeoutMs: 120_000,
-          ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'llama3.2' },
-        };
+        return defaultRunnerConfig;
       }
       if (key === 'toolRuntime') {
         return { mode: 'live', storageRoot: '.data/tool-storage', resultMaxBytes: 262_144 };
       }
       return undefined;
     });
-    (chatProvider.chat as jest.Mock).mockResolvedValue(
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(
       JSON.stringify({ trendFindings: { summary: 'enriched', trends: [] } }),
     );
 
@@ -172,7 +233,7 @@ describe('LlmAgentRunnerService', () => {
       baseInvoke.input,
       expect.objectContaining({ agentCode: 'fashion-trend-research' }),
     );
-    const chatCall = (chatProvider.chat as jest.Mock).mock.calls[0][0];
+    const chatCall = (ollamaProvider.chat as jest.Mock).mock.calls[0][0];
     const contents = (chatCall.messages as Array<{ content: string }>).map((m) => m.content);
     expect(contents.some((c) => c.includes('[Tool enrichment]'))).toBe(true);
     expect(contents.some((c) => c.includes('web-search'))).toBe(true);
@@ -195,17 +256,17 @@ describe('LlmAgentRunnerService', () => {
   });
 
   it('fails on non-JSON model content', async () => {
-    (chatProvider.chat as jest.Mock).mockResolvedValue('not-json');
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue('not-json');
     await expect(runner.invoke(baseInvoke)).rejects.toThrow(/not valid JSON/);
   });
 
   it('fails on schema validation', async () => {
-    (chatProvider.chat as jest.Mock).mockResolvedValue(JSON.stringify({ wrong: true }));
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(JSON.stringify({ wrong: true }));
     await expect(runner.invoke(baseInvoke)).rejects.toThrow(/missing required property/);
   });
 
   it('fails when provider throws timeout', async () => {
-    (chatProvider.chat as jest.Mock).mockRejectedValue(
+    (ollamaProvider.chat as jest.Mock).mockRejectedValue(
       new Error('LLM provider ollama timed out after 60000ms'),
     );
     await expect(runner.invoke(baseInvoke)).rejects.toThrow(/timed out/i);
@@ -213,7 +274,7 @@ describe('LlmAgentRunnerService', () => {
 
   it('fails on oversize response body', async () => {
     const huge = 'x'.repeat(1_048_576 + 10);
-    (chatProvider.chat as jest.Mock).mockResolvedValue(huge);
+    (ollamaProvider.chat as jest.Mock).mockResolvedValue(huge);
     await expect(runner.invoke(baseInvoke)).rejects.toThrow(/exceeds max size/);
   });
 });

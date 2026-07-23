@@ -7,6 +7,7 @@ import {
   throttleConfig,
   agentRunnerConfig,
   toolRuntimeConfig,
+  artifactStorageConfig,
 } from './misc.config';
 import redisConfig from './redis.config';
 import { envValidationSchema } from './env.validation';
@@ -24,4 +25,5 @@ export const configLoaders = [
   loggerConfig,
   agentRunnerConfig,
   toolRuntimeConfig,
+  artifactStorageConfig,
 ];

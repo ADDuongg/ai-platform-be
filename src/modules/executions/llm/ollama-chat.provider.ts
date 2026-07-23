@@ -104,8 +104,6 @@ function isTimeoutError(error: unknown): boolean {
   }
   const message = error instanceof Error ? error.message : String(error);
   return (
-    message.includes('TimeoutError') ||
-    message.includes('aborted') ||
-    message.includes('timeout')
+    message.includes('TimeoutError') || message.includes('aborted') || message.includes('timeout')
   );
 }

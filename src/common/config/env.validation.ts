@@ -51,7 +51,9 @@ export const envValidationSchema = Joi.object({
     .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent')
     .default('info'),
 
-  AGENT_RUNNER: Joi.string().valid('stub', 'ollama', 'openai', 'gemini').default('stub'),
+  AGENT_RUNNER: Joi.string()
+    .valid('stub', 'ollama', 'openai', 'anthropic', 'gemini')
+    .default('stub'),
   OLLAMA_BASE_URL: Joi.string().uri().default('http://127.0.0.1:11434'),
   OLLAMA_MODEL: Joi.string().default('llama3.2'),
   OLLAMA_TIMEOUT_MS: Joi.number().integer().positive().default(120_000),
@@ -59,10 +61,22 @@ export const envValidationSchema = Joi.object({
   OPENAI_API_KEY: Joi.string().allow('').optional(),
   OPENAI_BASE_URL: Joi.string().uri().optional(),
   OPENAI_MODEL: Joi.string().optional(),
+  ANTHROPIC_API_KEY: Joi.string().allow('').optional(),
+  ANTHROPIC_BASE_URL: Joi.string().uri().optional(),
+  ANTHROPIC_MODEL: Joi.string().optional(),
   GEMINI_API_KEY: Joi.string().allow('').optional(),
   GEMINI_MODEL: Joi.string().optional(),
 
   TOOL_RUNTIME: Joi.string().valid('stub', 'live').default('stub'),
   TOOL_STORAGE_ROOT: Joi.string().default('.data/tool-storage'),
   TOOL_RESULT_MAX_BYTES: Joi.number().integer().positive().default(262_144),
+
+  ARTIFACT_STORAGE: Joi.string().valid('local', 's3').default('local'),
+  ARTIFACT_STORAGE_ROOT: Joi.string().default('.data/execution-artifacts'),
+
+  FLUX_API_KEY: Joi.string().allow('').optional(),
+  BFL_API_KEY: Joi.string().allow('').optional(),
+  FLUX_BASE_URL: Joi.string().uri().optional(),
+  FLUX_ENDPOINT_PATH: Joi.string().optional(),
+  FLUX_POLL_INTERVAL_MS: Joi.number().integer().positive().optional(),
 });

@@ -56,6 +56,32 @@ describe('reference-url.sanitizer', () => {
     expect((refs[0] as { url: string }).url).toContain('example.com/real');
   });
 
+  it('drops hallucinated evidence urls when allowlist is set', () => {
+    const allowed = new Set([normalizeUrl('https://example.com/real')!]);
+    const out = sanitizeReferencesAgainstAllowlist(
+      {
+        trendFindings: {
+          summary: 'x',
+          trends: [
+            {
+              name: 'A',
+              confidence: 0.5,
+              notes: 'n',
+              evidence: [
+                { title: 'Real', url: 'https://example.com/real', quote: 'ok' },
+                { title: 'Fake', url: 'https://totally-fake.example/404', quote: 'no' },
+              ],
+            },
+          ],
+        },
+      },
+      allowed,
+    );
+    const trends = (out.trendFindings as { trends: Array<{ evidence: unknown[] }> }).trends;
+    expect(trends[0]?.evidence).toHaveLength(1);
+    expect((trends[0]?.evidence[0] as { url: string }).url).toContain('example.com/real');
+  });
+
   it('clears all references when allowlist empty and annotates gaps', () => {
     const out = sanitizeReferencesAgainstAllowlist(
       {

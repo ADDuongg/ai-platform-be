@@ -73,15 +73,21 @@ export class ExecutionsController {
   @Permissions(PERMISSIONS.EXECUTIONS.CANCEL)
   @ApiOperation({ summary: 'Cancel Execution' })
   @ApiOkResponse({ type: ExecutionResponseDto })
-  async cancel(@Param('id', ParseUUIDPipe) id: string): Promise<ExecutionResponseDto> {
-    return this.executionsService.cancel(id);
+  async cancel(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ExecutionResponseDto> {
+    return this.executionsService.cancel(id, user.sub);
   }
 
   @Post(':id/retry')
   @Permissions(PERMISSIONS.EXECUTIONS.RETRY)
   @ApiOperation({ summary: 'Retry failed Execution' })
   @ApiOkResponse({ type: ExecutionResponseDto })
-  async retry(@Param('id', ParseUUIDPipe) id: string): Promise<ExecutionResponseDto> {
-    return this.executionsService.retry(id);
+  async retry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ExecutionResponseDto> {
+    return this.executionsService.retry(id, user.sub);
   }
 }

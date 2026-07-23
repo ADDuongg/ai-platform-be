@@ -3,6 +3,8 @@ import { HttpStatus } from '@nestjs/common';
 import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { PromptEntity } from '../entities/prompt.entity';
 import { PromptVersionEntity } from '../entities/prompt-version.entity';
 import { PromptStatus, PromptVersionStatus } from '../enums';
@@ -14,6 +16,7 @@ describe('PromptsService', () => {
   let service: PromptsService;
   let promptsRepository: jest.Mocked<PromptsRepository>;
   let promptVersionsRepository: jest.Mocked<PromptVersionsRepository>;
+  let auditLogService: jest.Mocked<AuditLogService>;
 
   const adminPermissions = [
     PERMISSIONS.PROMPTS.READ,
@@ -94,7 +97,11 @@ describe('PromptsService', () => {
       save: jest.fn(),
     } as unknown as jest.Mocked<PromptVersionsRepository>;
 
-    service = new PromptsService(promptsRepository, promptVersionsRepository);
+    auditLogService = {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<AuditLogService>;
+
+    service = new PromptsService(promptsRepository, promptVersionsRepository, auditLogService);
   });
 
   describe('visibility', () => {
@@ -198,6 +205,23 @@ describe('PromptsService', () => {
       await expect(service.update('prompt-1', { template: 'new content' })).rejects.toMatchObject({
         response: expect.objectContaining({ code: ERROR_CODES.PROMPT_VERSION_IMMUTABLE }),
       });
+    });
+
+    it('allows template updates when a draft version exists', async () => {
+      const draft = { ...draftVersion, version: 2 };
+      promptsRepository.findById.mockResolvedValue({ ...publishedPrompt });
+      promptsRepository.save.mockImplementation(async (entity) => entity);
+      promptVersionsRepository.findDraftByPromptId.mockResolvedValue(draft);
+      promptVersionsRepository.save.mockImplementation(async (entity) => entity);
+
+      const result = await service.update('prompt-1', {
+        template: 'Research trends for {{season}}.',
+      });
+
+      expect(promptVersionsRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ template: 'Research trends for {{season}}.' }),
+      );
+      expect(result.draftVersion).toBe(2);
     });
 
     it('allows metadata updates without draft version', async () => {

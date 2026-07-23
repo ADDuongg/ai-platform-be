@@ -5,6 +5,9 @@ import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 import { assertJsonPayloadSize, canSeeCatalogDrafts } from '@common/utils';
 
+import { AuditAction, AuditDomain } from '@modules/audit/constants/audit.constants';
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+import { LlmCatalogService } from '@modules/llm/services/llm-catalog.service';
 import { PromptsService } from '@modules/prompts/services/prompts.service';
 import { ToolsService } from '@modules/tools/services/tools.service';
 
@@ -30,6 +33,8 @@ export class AgentsService {
     private readonly agentVersionsRepository: AgentVersionsRepository,
     private readonly promptsService: PromptsService,
     private readonly toolsService: ToolsService,
+    private readonly llmCatalogService: LlmCatalogService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreateAgentDto, actorId: string): Promise<AgentResponseDto> {
@@ -38,6 +43,7 @@ export class AgentsService {
     assertJsonPayloadSize(dto.outputSchema, 'outputSchema');
     if (dto.config) {
       assertJsonPayloadSize(dto.config, 'config');
+      this.llmCatalogService.assertValidProviderModel(dto.config);
     }
 
     const existing = await this.agentsRepository.findByCode(code);
@@ -50,7 +56,7 @@ export class AgentsService {
     await this.validatePromptRef(dto.promptRef);
     await this.validateToolRefs(dto.toolRefs);
 
-    return this.agentsRepository.withTransaction(async (manager) => {
+    const result = await this.agentsRepository.withTransaction(async (manager) => {
       const agentRepo = manager.getRepository(AgentEntity);
       const versionRepo = manager.getRepository(AgentVersionEntity);
 
@@ -87,6 +93,18 @@ export class AgentsService {
 
       return this.toAgentDto(savedAgent, 1);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: AuditAction.CREATED,
+      resourceType: 'agent',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId,
+      metadata: { capabilityType: result.capabilityType },
+    });
+
+    return result;
   }
 
   async list(
@@ -147,7 +165,7 @@ export class AgentsService {
     return agent;
   }
 
-  async update(id: string, dto: UpdateAgentDto): Promise<AgentResponseDto> {
+  async update(id: string, dto: UpdateAgentDto, actorId?: string): Promise<AgentResponseDto> {
     const agent = await this.requireMutableAgent(id);
     const hasConfigChange = this.hasConfigFields(dto);
 
@@ -162,6 +180,10 @@ export class AgentsService {
     }
 
     let draft: AgentVersionEntity | null = null;
+    let llmChange: {
+      before: { provider: unknown; model: unknown };
+      after: { provider: unknown; model: unknown };
+    } | null = null;
 
     if (hasConfigChange) {
       if (dto.inputSchema) {
@@ -172,6 +194,7 @@ export class AgentsService {
       }
       if (dto.config) {
         assertJsonPayloadSize(dto.config, 'config');
+        this.llmCatalogService.assertValidProviderModel(dto.config);
       }
 
       await this.validatePromptRef(dto.promptRef);
@@ -185,6 +208,20 @@ export class AgentsService {
           { code: ERROR_CODES.AGENT_NO_DRAFT_TO_PUBLISH },
         );
       }
+
+      if (dto.config !== undefined) {
+        const beforeProvider = draft.configJson?.provider;
+        const beforeModel = draft.configJson?.model;
+        const afterProvider = dto.config.provider;
+        const afterModel = dto.config.model;
+        if (beforeProvider !== afterProvider || beforeModel !== afterModel) {
+          llmChange = {
+            before: { provider: beforeProvider, model: beforeModel },
+            after: { provider: afterProvider, model: afterModel },
+          };
+        }
+      }
+
       this.applyConfigToVersion(draft, dto);
       await this.agentVersionsRepository.save(draft);
     }
@@ -193,13 +230,37 @@ export class AgentsService {
     if (!draft) {
       draft = await this.agentVersionsRepository.findDraftByAgentId(agent.id);
     }
-    return this.toAgentDto(agent, draft?.version ?? null);
+    const result = this.toAgentDto(agent, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: AuditAction.UPDATED,
+      resourceType: 'agent',
+      resourceId: agent.id,
+      resourceCode: agent.code,
+      actorUserId: actorId ?? null,
+      metadata: { draftVersion: draft?.version ?? null },
+    });
+
+    if (llmChange) {
+      await this.auditLogService.record({
+        domain: AuditDomain.AGENT,
+        action: AuditAction.LLM_CONFIG_CHANGED,
+        resourceType: 'agent',
+        resourceId: agent.id,
+        resourceCode: agent.code,
+        actorUserId: actorId ?? null,
+        metadata: llmChange,
+      });
+    }
+
+    return result;
   }
 
-  async publish(id: string): Promise<AgentResponseDto> {
+  async publish(id: string, actorId?: string): Promise<AgentResponseDto> {
     const agent = await this.requireMutableAgent(id);
 
-    return this.agentsRepository.withTransaction(async (manager) => {
+    const result = await this.agentsRepository.withTransaction(async (manager) => {
       const agentRepo = manager.getRepository(AgentEntity);
       const versionRepo = manager.getRepository(AgentVersionEntity);
 
@@ -237,6 +298,18 @@ export class AgentsService {
 
       return this.toAgentDto(lockedAgent, null);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: AuditAction.PUBLISHED,
+      resourceType: 'agent',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId ?? null,
+      metadata: { version: result.currentVersion },
+    });
+
+    return result;
   }
 
   async createVersion(
@@ -287,7 +360,19 @@ export class AgentsService {
       createdBy: actorId,
     });
 
-    return this.toVersionDto(draft);
+    const result = this.toVersionDto(draft);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: AuditAction.CREATED,
+      resourceType: 'agent_version',
+      resourceId: agent.id,
+      resourceCode: agent.code,
+      actorUserId: actorId,
+      metadata: { version: draft.version },
+    });
+
+    return result;
   }
 
   async listVersions(
@@ -316,19 +401,29 @@ export class AgentsService {
     return this.toVersionDto(row);
   }
 
-  async enable(id: string): Promise<AgentResponseDto> {
-    return this.setEnabled(id, true);
+  async enable(id: string, actorId?: string): Promise<AgentResponseDto> {
+    return this.setEnabled(id, true, actorId);
   }
 
-  async disable(id: string): Promise<AgentResponseDto> {
-    return this.setEnabled(id, false);
+  async disable(id: string, actorId?: string): Promise<AgentResponseDto> {
+    return this.setEnabled(id, false, actorId);
   }
 
-  async softDelete(id: string): Promise<{ message: string }> {
+  async softDelete(id: string, actorId?: string): Promise<{ message: string }> {
     const agent = await this.requireMutableAgent(id);
     agent.status = AgentStatus.ARCHIVED;
     await this.agentsRepository.save(agent);
     await this.agentsRepository.softDelete(id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: AuditAction.ARCHIVED,
+      resourceType: 'agent',
+      resourceId: agent.id,
+      resourceCode: agent.code,
+      actorUserId: actorId ?? null,
+    });
+
     return { message: 'Agent archived' };
   }
 
@@ -336,12 +431,27 @@ export class AgentsService {
     return canSeeCatalogDrafts(permissions, PERMISSIONS.AGENTS.UPDATE);
   }
 
-  private async setEnabled(id: string, enabled: boolean): Promise<AgentResponseDto> {
+  private async setEnabled(
+    id: string,
+    enabled: boolean,
+    actorId?: string,
+  ): Promise<AgentResponseDto> {
     const agent = await this.requireMutableAgent(id);
     agent.enabled = enabled;
     await this.agentsRepository.save(agent);
     const draft = await this.agentVersionsRepository.findDraftByAgentId(agent.id);
-    return this.toAgentDto(agent, draft?.version ?? null);
+    const result = this.toAgentDto(agent, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.AGENT,
+      action: enabled ? AuditAction.ENABLED : AuditAction.DISABLED,
+      resourceType: 'agent',
+      resourceId: agent.id,
+      resourceCode: agent.code,
+      actorUserId: actorId ?? null,
+    });
+
+    return result;
   }
 
   private async requireMutableAgent(id: string): Promise<AgentEntity> {

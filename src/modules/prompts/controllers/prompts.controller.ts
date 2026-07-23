@@ -85,39 +85,52 @@ export class PromptsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePromptDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<PromptResponseDto> {
-    return this.promptsService.update(id, dto);
+    return this.promptsService.update(id, dto, user.sub);
   }
 
   @Delete(':id')
   @Permissions(PERMISSIONS.PROMPTS.DELETE)
   @ApiOperation({ summary: 'Soft-delete (archive) Prompt' })
-  async softDelete(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
-    return this.promptsService.softDelete(id);
+  async softDelete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.promptsService.softDelete(id, user.sub);
   }
 
   @Post(':id/publish')
   @Permissions(PERMISSIONS.PROMPTS.PUBLISH)
   @ApiOperation({ summary: 'Publish current draft version' })
   @ApiOkResponse({ type: PromptResponseDto })
-  async publish(@Param('id', ParseUUIDPipe) id: string): Promise<PromptResponseDto> {
-    return this.promptsService.publish(id);
+  async publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PromptResponseDto> {
+    return this.promptsService.publish(id, user.sub);
   }
 
   @Post(':id/enable')
   @Permissions(PERMISSIONS.PROMPTS.UPDATE)
   @ApiOperation({ summary: 'Enable Prompt' })
   @ApiOkResponse({ type: PromptResponseDto })
-  async enable(@Param('id', ParseUUIDPipe) id: string): Promise<PromptResponseDto> {
-    return this.promptsService.enable(id);
+  async enable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PromptResponseDto> {
+    return this.promptsService.enable(id, user.sub);
   }
 
   @Post(':id/disable')
   @Permissions(PERMISSIONS.PROMPTS.UPDATE)
   @ApiOperation({ summary: 'Disable Prompt' })
   @ApiOkResponse({ type: PromptResponseDto })
-  async disable(@Param('id', ParseUUIDPipe) id: string): Promise<PromptResponseDto> {
-    return this.promptsService.disable(id);
+  async disable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<PromptResponseDto> {
+    return this.promptsService.disable(id, user.sub);
   }
 
   @Get(':id/versions')

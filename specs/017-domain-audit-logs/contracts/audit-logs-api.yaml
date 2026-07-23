@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: Domain Audit Logs API
+  version: 1.0.0
+  description: |
+    Append-only domain audit trail for Agents, Workflows, Tools, Prompts, and Executions.
+    Write path is internal only (no public POST). Auth audit (`auth_audit_logs`) remains separate.
+    Requires permission `audit:read` (seeded for admin + super_admin).
+servers:
+  - url: /api/v1
+tags:
+  - name: Audit Logs
+paths:
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: List domain audit events
+      operationId: listAuditLogs
+      security:
+        - bearerAuth: []
+      description: Requires `audit:read`. Newest first.
+      parameters:
+        - name: domain
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditDomain'
+        - name: action
+          in: query
+          schema:
+            type: string
+            description: Prefer AuditAction values; other strings may appear if enum expands
+        - name: resourceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: resourceCode
+          in: query
+          schema: { type: string }
+        - name: actorUserId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: createdFrom
+          in: query
+          schema: { type: string, format: date-time }
+        - name: createdTo
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /audit-logs/{id}:
+    get:
+      tags: [Audit Logs]
+      summary: Get audit event by id
+      operationId: getAuditLog
+      security:
+        - bearerAuth: []
+      description: Requires `audit:read`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Audit event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogDetailEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuditDomain:
+      type: string
+      enum: [agent, workflow, tool, prompt, execution]
+    AuditAction:
+      type: string
+      enum:
+        - created
+        - updated
+        - published
+        - enabled
+        - disabled
+        - archived
+        - deleted
+        - execution_started
+        - execution_cancelled
+        - execution_retried
+        - llm_config_changed
+    AuditLog:
+      type: object
+      required:
+        - id
+        - domain
+        - action
+        - resourceType
+        - resourceId
+        - resourceCode
+        - actorUserId
+        - ip
+        - userAgent
+        - metadata
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        domain:
+          $ref: '#/components/schemas/AuditDomain'
+        action:
+          type: string
+          description: Typically an AuditAction value
+        resourceType:
+          type: string
+          example: agent
+        resourceId:
+          type: string
+          format: uuid
+        resourceCode:
+          type: string
+          nullable: true
+        actorUserId:
+          type: string
+          format: uuid
+          nullable: true
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Non-sensitive change summary only (no secrets)
+        createdAt:
+          type: string
+          format: date-time
+    PaginationMeta:
+      type: object
+      required: [page, limit, total]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+    AuditLogListEnvelope:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+    AuditLogDetailEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/AuditLog'
+    ApiErrorBody:
+      type: object
+      required: [code, message, details]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details:
+          nullable: true
+    ApiErrorEnvelope:
+      type: object
+      required: [success, error, timestamp, path]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/ApiErrorBody'
+        timestamp: { type: string, format: date-time }
+        path: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+    Forbidden:
+      description: Authenticated but missing `audit:read`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'
+    NotFound:
+      description: Audit log not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorEnvelope'

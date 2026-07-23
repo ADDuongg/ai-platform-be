@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AuditModule } from '@modules/audit/audit.module';
+
 import { AgentsModule } from '../agents/agents.module';
 import { WorkflowBuilderController } from './controllers/workflow-builder.controller';
 import { WorkflowsController } from './controllers/workflows.controller';
@@ -13,7 +15,7 @@ import { WorkflowDefinitionValidator } from './services/workflow-definition.vali
 import { WorkflowsService } from './services/workflows.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WorkflowEntity, WorkflowVersionEntity]), AgentsModule],
+  imports: [TypeOrmModule.forFeature([WorkflowEntity, WorkflowVersionEntity]), AgentsModule, AuditModule],
   controllers: [WorkflowsController, WorkflowBuilderController],
   providers: [
     WorkflowsService,

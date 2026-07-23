@@ -113,7 +113,9 @@ Commented placeholders (not required):
 |-----|-----------------|
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_CX` | Google Custom Search |
 | `BROWSERLESS_URL` / `BROWSERLESS_TOKEN` | Browserless |
-| `FLUX_API_KEY` | Flux cloud |
+| `FLUX_API_KEY` / `BFL_API_KEY` | Flux / BFL (`provider=flux`, endpoint `/v1/flux-2-pro`) |
+| `FLUX_BASE_URL` | Default `https://api.bfl.ai` |
+| `FLUX_ENDPOINT_PATH` | Default `/v1/flux-2-pro` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_S3_BUCKET` / `AWS_REGION` | AWS S3 |
 
 ## Validation rules

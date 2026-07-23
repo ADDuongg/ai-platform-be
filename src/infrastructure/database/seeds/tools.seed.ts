@@ -11,61 +11,79 @@ const SAMPLE_TOOLS: Array<{
   name: string;
   description: string;
   toolType: ToolType;
+  timeoutMs: number;
 }> = [
   {
     code: 'web-search',
     name: 'Web Search',
-    description: 'Stub search tool for research workflows',
+    description: 'Search enrichment for trend research',
     toolType: ToolType.SEARCH,
-  },
-  {
-    code: 'web-browser',
-    name: 'Web Browser',
-    description: 'Stub browser tool for page fetch/navigation',
-    toolType: ToolType.BROWSER,
+    timeoutMs: 30_000,
   },
   {
     code: 'image-generation',
-    name: 'Image Generation',
-    description: 'Stub image generation tool',
+    name: 'Image Generation (FLUX.2 Pro)',
+    description: 'BFL FLUX.2 Pro via TOOL_RUNTIME=live + FLUX_API_KEY',
     toolType: ToolType.IMAGE_GENERATION,
-  },
-  {
-    code: 'object-storage',
-    name: 'Object Storage',
-    description: 'Stub storage tool for artifacts',
-    toolType: ToolType.STORAGE,
+    timeoutMs: 180_000,
   },
 ];
 
 const AGENT_TOOL_WIRING: Array<{ agentCode: string; toolCode: string }> = [
-  { agentCode: 'research-agent', toolCode: 'web-search' },
-  { agentCode: 'review-agent', toolCode: 'object-storage' },
   { agentCode: 'fashion-trend-research', toolCode: 'web-search' },
-  { agentCode: 'fashion-reference-collector', toolCode: 'web-search' },
-  { agentCode: 'fashion-image-search', toolCode: 'web-search' },
-  { agentCode: 'fashion-image-search', toolCode: 'web-browser' },
-  { agentCode: 'fashion-color-analyzer', toolCode: 'web-browser' },
-  { agentCode: 'fashion-style-analyzer', toolCode: 'web-browser' },
-  { agentCode: 'fashion-pattern-analyzer', toolCode: 'web-browser' },
   { agentCode: 'fashion-image-generator', toolCode: 'image-generation' },
-  { agentCode: 'fashion-image-organizer', toolCode: 'object-storage' },
-  { agentCode: 'fashion-design-scorer', toolCode: 'object-storage' },
 ];
 
 function configForTool(code: string): Record<string, unknown> {
   switch (code) {
     case 'web-search':
       return { provider: 'duckduckgo', maxResults: 5 };
-    case 'web-browser':
-      return { provider: 'native-fetch', maxBytes: 262144 };
     case 'image-generation':
-      return { provider: 'stub-live' };
-    case 'object-storage':
-      return { provider: 'filesystem', rootEnv: 'TOOL_STORAGE_ROOT' };
+      // Live Flux when TOOL_RUNTIME=live and FLUX_API_KEY / BFL_API_KEY set.
+      // Adapter falls back to stub-live if provider is not "flux".
+      return {
+        provider: 'flux',
+        // Portrait 4:5 default for kids apparel (workflow also maps width/height).
+        defaultWidth: 1024,
+        defaultHeight: 1280,
+        maxImagesPerInvoke: 1,
+      };
     default:
       return { provider: 'stub-live' };
   }
+}
+
+function schemasForTool(code: string): {
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+} {
+  if (code === 'image-generation') {
+    return {
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          imagePrompt: { type: 'string' },
+          width: { type: 'number' },
+          height: { type: 'number' },
+        },
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string' },
+          assetUrl: { type: 'string' },
+          promptEcho: { type: 'string' },
+          width: { type: 'number' },
+          height: { type: 'number' },
+        },
+      },
+    };
+  }
+  return {
+    inputSchema: { type: 'object' },
+    outputSchema: { type: 'object' },
+  };
 }
 
 export async function seedTools(): Promise<void> {
@@ -109,6 +127,8 @@ export async function seedTools(): Promise<void> {
       where: { toolId: tool.id, version: 1 },
     });
 
+    const schemas = schemasForTool(sample.code);
+
     if (!version) {
       await versionRepo.save(
         versionRepo.create({
@@ -116,22 +136,23 @@ export async function seedTools(): Promise<void> {
           version: 1,
           status: ToolVersionStatus.PUBLISHED,
           configJson: configForTool(sample.code),
-          inputSchema: { type: 'object' },
-          outputSchema: { type: 'object' },
+          inputSchema: schemas.inputSchema,
+          outputSchema: schemas.outputSchema,
           secretRef: null,
-          timeoutMs: 30_000,
-          maxRetries: 1,
-          changelog: 'Initial published free/local tool config',
+          timeoutMs: sample.timeoutMs,
+          maxRetries: 0,
+          changelog: 'Seeded tool v1',
           publishedAt: new Date(),
           createdBy: null,
         }),
       );
     } else {
       version.status = ToolVersionStatus.PUBLISHED;
-      version.publishedAt = version.publishedAt ?? new Date();
       version.configJson = configForTool(sample.code);
-      version.timeoutMs = version.timeoutMs ?? 30_000;
-      version.maxRetries = version.maxRetries ?? 1;
+      version.inputSchema = schemas.inputSchema;
+      version.outputSchema = schemas.outputSchema;
+      version.timeoutMs = sample.timeoutMs;
+      version.publishedAt = version.publishedAt ?? new Date();
       await versionRepo.save(version);
     }
 
@@ -140,19 +161,21 @@ export async function seedTools(): Promise<void> {
 
   for (const wire of AGENT_TOOL_WIRING) {
     const agent = await agentRepo.findOne({ where: { code: wire.agentCode } });
-    if (!agent) continue;
-
+    if (!agent?.currentVersion) {
+      continue;
+    }
     const agentVersion = await agentVersionRepo.findOne({
-      where: { agentId: agent.id, version: agent.currentVersion ?? 1 },
+      where: { agentId: agent.id, version: agent.currentVersion },
     });
-    if (!agentVersion) continue;
-
+    if (!agentVersion) {
+      continue;
+    }
     const refs = Array.isArray(agentVersion.toolRefs) ? [...agentVersion.toolRefs] : [];
     if (!refs.includes(wire.toolCode)) {
       refs.push(wire.toolCode);
       agentVersion.toolRefs = refs;
       await agentVersionRepo.save(agentVersion);
-      console.log(`Wired ${wire.agentCode} toolRefs → +${wire.toolCode}`);
+      console.log(`Wired ${wire.agentCode} toolRefs → ${wire.toolCode}`);
     }
   }
 

@@ -1,0 +1,716 @@
+openapi: 3.0.3
+info:
+  title: Agent / Prompt Draft Editors API
+  version: 1.0.0
+  description: |
+    FE-facing subset for draft edit flows (feature 020).
+    Full catalogs: Agent Registry (002), Prompt Library (006).
+    No new Nest modules — documents existing `/api/v1` behavior.
+
+    Permissions:
+    - agents:read / prompts:read — get + version get
+    - agents:update / prompts:update — create draft version + PATCH draft content
+    - agents:publish / prompts:publish — publish draft
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: AgentDraft
+  - name: PromptDraft
+
+paths:
+  /agents/{id}:
+    get:
+      tags: [AgentDraft]
+      summary: Get Agent summary (includes draftVersion when present)
+      operationId: getAgent
+      security:
+        - bearerAuth: []
+      description: Requires `agents:read`
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Agent summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSummaryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [AgentDraft]
+      summary: Update Agent metadata and/or draft schemas
+      operationId: updateAgentDraft
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `agents:update`.
+        `inputSchema` / `outputSchema` / other config fields require an existing draft version;
+        otherwise **409** with `AGENT_NO_DRAFT_TO_PUBLISH`.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentDraftRequest'
+            examples:
+              flatSchemas:
+                summary: Form-serialized flat object schemas
+                value:
+                  inputSchema:
+                    type: object
+                    required: [season]
+                    properties:
+                      season:
+                        type: string
+                  outputSchema:
+                    type: object
+                    required: [final_result]
+                    properties:
+                      final_result:
+                        type: string
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSummaryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /agents/{id}/versions:
+    post:
+      tags: [AgentDraft]
+      summary: Create draft version from current published
+      operationId: createAgentVersion
+      security:
+        - bearerAuth: []
+      description: Requires `agents:update`. 409 if draft already exists.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+      responses:
+        '201':
+          description: Draft version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /agents/{id}/versions/{version}:
+    get:
+      tags: [AgentDraft]
+      summary: Get Agent version (draft or published)
+      operationId: getAgentVersion
+      security:
+        - bearerAuth: []
+      description: Requires `agents:read`
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: Version detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /agents/{id}/publish:
+    post:
+      tags: [AgentDraft]
+      summary: Publish current draft
+      operationId: publishAgent
+      security:
+        - bearerAuth: []
+      description: Requires `agents:publish`
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSummaryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/{id}:
+    get:
+      tags: [PromptDraft]
+      summary: Get Prompt summary
+      operationId: getPrompt
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:read`
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Prompt summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptSummaryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [PromptDraft]
+      summary: Update Prompt metadata and/or draft template
+      operationId: updatePromptDraft
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `prompts:update`.
+        Content fields (`template`, etc.) require a draft; otherwise **409** `PROMPT_VERSION_IMMUTABLE`.
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePromptDraftRequest'
+            examples:
+              templateOnly:
+                summary: MVP template save
+                value:
+                  template: 'Research trends for {{season}} in {{category}}.'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptSummaryEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/{id}/versions:
+    post:
+      tags: [PromptDraft]
+      summary: Create draft version
+      operationId: createPromptVersion
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:update`
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+      responses:
+        '201':
+          description: Draft version created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /prompts/{id}/versions/{version}:
+    get:
+      tags: [PromptDraft]
+      summary: Get Prompt version
+      operationId: getPromptVersion
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:read`
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: Version detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptVersionEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /prompts/{id}/publish:
+    post:
+      tags: [PromptDraft]
+      summary: Publish current draft
+      operationId: publishPrompt
+      security:
+        - bearerAuth: []
+      description: Requires `prompts:publish`
+      parameters:
+        - $ref: '#/components/parameters/PromptId'
+      responses:
+        '200':
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptSummaryEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    AgentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PromptId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VersionNumber:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+
+  schemas:
+    JsonObject:
+      type: object
+      additionalProperties: true
+
+    CreateVersionRequest:
+      type: object
+      properties:
+        changelog:
+          type: string
+
+    UpdateAgentDraftRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        inputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        outputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        config:
+          $ref: '#/components/schemas/JsonObject'
+        timeoutMs:
+          type: integer
+        maxRetries:
+          type: integer
+        promptRef:
+          type: string
+          nullable: true
+        toolRefs:
+          type: array
+          items:
+            type: string
+        changelog:
+          type: string
+
+    UpdatePromptDraftRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        template:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [role, content]
+            properties:
+              role:
+                type: string
+                enum: [system, user, assistant]
+              content:
+                type: string
+        variablesSchema:
+          $ref: '#/components/schemas/JsonObject'
+        modelHints:
+          $ref: '#/components/schemas/JsonObject'
+        changelog:
+          type: string
+
+    AgentSummary:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - status
+        - enabled
+        - currentVersion
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, published, archived]
+        enabled:
+          type: boolean
+        currentVersion:
+          type: integer
+          nullable: true
+        draftVersion:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AgentVersion:
+      type: object
+      required:
+        - id
+        - agentId
+        - version
+        - status
+        - inputSchema
+        - outputSchema
+        - config
+        - toolRefs
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, published]
+        inputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        outputSchema:
+          $ref: '#/components/schemas/JsonObject'
+        config:
+          $ref: '#/components/schemas/JsonObject'
+        timeoutMs:
+          type: integer
+          nullable: true
+        maxRetries:
+          type: integer
+          nullable: true
+        promptRef:
+          type: string
+          nullable: true
+        toolRefs:
+          type: array
+          items:
+            type: string
+        changelog:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PromptSummary:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - tags
+        - status
+        - enabled
+        - currentVersion
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [draft, published, archived]
+        enabled:
+          type: boolean
+        currentVersion:
+          type: integer
+          nullable: true
+        draftVersion:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PromptVersion:
+      type: object
+      required:
+        - id
+        - promptId
+        - version
+        - status
+        - variablesSchema
+        - modelHints
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        promptId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, published]
+        template:
+          type: string
+          nullable: true
+        messages:
+          type: array
+          nullable: true
+          items:
+            type: object
+        variablesSchema:
+          $ref: '#/components/schemas/JsonObject'
+        modelHints:
+          $ref: '#/components/schemas/JsonObject'
+        changelog:
+          type: string
+          nullable: true
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AgentSummaryEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/AgentSummary'
+
+    AgentVersionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/AgentVersion'
+
+    PromptSummaryEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/PromptSummary'
+
+    PromptVersionEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: '#/components/schemas/PromptVersion'
+
+    ApiErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          nullable: true
+
+    ApiErrorResponse:
+      type: object
+      required: [success, error, timestamp, path]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/ApiErrorBody'
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Unauthorized:
+      description: Missing/invalid auth
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Forbidden:
+      description: Missing permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Conflict:
+      description: |
+        Conflict — e.g. no draft (`AGENT_NO_DRAFT_TO_PUBLISH`, `PROMPT_VERSION_IMMUTABLE`,
+        `PROMPT_NO_DRAFT_TO_PUBLISH`), or draft already exists.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'

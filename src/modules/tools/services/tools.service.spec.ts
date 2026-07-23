@@ -3,6 +3,8 @@ import { HttpStatus } from '@nestjs/common';
 import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { ToolEntity } from '../entities/tool.entity';
 import { ToolVersionEntity } from '../entities/tool-version.entity';
 import { ToolStatus, ToolType, ToolVersionStatus } from '../enums';
@@ -14,6 +16,7 @@ describe('ToolsService', () => {
   let service: ToolsService;
   let toolsRepository: jest.Mocked<ToolsRepository>;
   let toolVersionsRepository: jest.Mocked<ToolVersionsRepository>;
+  let auditLogService: jest.Mocked<AuditLogService>;
 
   const adminPermissions = [
     PERMISSIONS.TOOLS.READ,
@@ -89,7 +92,11 @@ describe('ToolsService', () => {
       save: jest.fn(),
     } as unknown as jest.Mocked<ToolVersionsRepository>;
 
-    service = new ToolsService(toolsRepository, toolVersionsRepository);
+    auditLogService = {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<AuditLogService>;
+
+    service = new ToolsService(toolsRepository, toolVersionsRepository, auditLogService);
   });
 
   describe('visibility', () => {

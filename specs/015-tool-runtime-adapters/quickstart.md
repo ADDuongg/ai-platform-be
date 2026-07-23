@@ -9,7 +9,8 @@ Validates free/local live tools with pre-step enrichment on a Kids Fashion Agent
 - Platform DB migrated + seeded (`pnpm migration:run && pnpm seed`)
 - Ollama running with a chat model (same as Card 1)
 - Outbound network allowed for DuckDuckGo-style search and optional browser fetch
-- No Google CSE / Browserless / Flux / AWS credentials required for MVP
+- For live Flux image-generation: `FLUX_API_KEY` (or `BFL_API_KEY`) + BFL credits
+- No Google CSE / Browserless / AWS credentials required for MVP
 
 ## Configuration
 
@@ -23,12 +24,17 @@ TOOL_RUNTIME=live
 TOOL_STORAGE_ROOT=.data/tool-storage
 # TOOL_RESULT_MAX_BYTES=262144
 
-# Future paid (commented — do not enable in MVP):
+# Flux / BFL (image-generation tool config provider=flux; seeded by default)
+FLUX_API_KEY=
+# BFL_API_KEY=          # alias if FLUX_API_KEY unset
+FLUX_BASE_URL=https://api.bfl.ai
+FLUX_ENDPOINT_PATH=/v1/flux-2-pro
+
+# Future paid (commented):
 # GOOGLE_CSE_API_KEY=
 # GOOGLE_CSE_CX=
 # BROWSERLESS_URL=
 # BROWSERLESS_TOKEN=
-# FLUX_API_KEY=
 # AWS_ACCESS_KEY_ID=
 # AWS_SECRET_ACCESS_KEY=
 # AWS_S3_BUCKET=
@@ -70,10 +76,16 @@ TOOL_RUNTIME=stub
 2. Run a Workflow/Agent that includes `object-storage` in `toolRefs` (e.g. design review / image organizer path).
 3. Confirm files appear under `TOOL_STORAGE_ROOT/{executionId}/...`.
 
-## Optional — stub-live image-generation
+## Optional — Flux image-generation
 
-1. Run an Agent with `image-generation` in `toolRefs`.
-2. Enrichment includes `provider: "stub-live"` (or equivalent) placeholder asset — **not** a Flux API call.
+1. Set `FLUX_API_KEY` (BFL dashboard key) and ensure tool version `configJson.provider` is `flux` (seed default).
+2. Keep `TOOL_RUNTIME=live` and a live LLM mode.
+3. Run Workflow `kids-fashion-image-generation` (or any Agent with `image-generation` in `toolRefs`).
+4. Enrichment / Shared Context should include `provider: "flux"` and `assetUrl` pointing at a BFL signed sample URL.
+
+### Offline fallback — stub-live
+
+Set tool `configJson.provider` to `stub-live` (or omit Flux key and avoid `provider=flux`). Enrichment returns a local SVG data-URL placeholder — **no** BFL call.
 
 ## Failure drills
 
@@ -83,10 +95,11 @@ TOOL_RUNTIME=stub
 | Invalid `TOOL_RUNTIME=foo` | App fails to boot |
 | `AGENT_RUNNER=stub` + `TOOL_RUNTIME=live` | No live tool HTTP; stub fixtures only |
 | Unreachable search endpoint (mock/block network) | Step fails or retries then fails |
+| `provider=flux` without `FLUX_API_KEY` | Tool fails with clear missing-key error |
 
 ## Out of scope for this quickstart
 
-- Enabling Google Custom Search, Browserless, Flux, or AWS S3 (commented scaffolding only)
+- Enabling Google Custom Search, Browserless, or AWS S3 (commented scaffolding only)
 - Function-calling / tool-call loops
 - New public Tool-execute REST endpoints
 

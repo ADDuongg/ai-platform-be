@@ -1,0 +1,160 @@
+openapi: 3.0.3
+info:
+  title: LLM Catalog API
+  version: 1.0.0
+  description: |
+    Static allowlist of LLM providers and models for FE select when configuring Agents.
+    Persist selection via Agent Registry `PATCH /agents/{id}` with
+    `config.provider` + `config.model` (then publish draft).
+servers:
+  - url: /api/v1
+tags:
+  - name: LLM Catalog
+paths:
+  /llm/providers:
+    get:
+      tags: [LLM Catalog]
+      summary: List LLM providers and nested models
+      operationId: listLlmProviders
+      security:
+        - bearerAuth: []
+      description: Requires `agents:read`. Returns static catalog; `configured` reflects env credentials.
+      responses:
+        '200':
+          description: Provider catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmProvidersEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /llm/models:
+    get:
+      tags: [LLM Catalog]
+      summary: List LLM models (optional provider filter)
+      operationId: listLlmModels
+      security:
+        - bearerAuth: []
+      description: Requires `agents:read`.
+      parameters:
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [openai, anthropic, ollama, gemini]
+          description: When set, return models for that provider only
+      responses:
+        '200':
+          description: Model list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlmModelsEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    LlmModel:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          example: gpt-4o
+        label:
+          type: string
+          example: GPT-4o
+    LlmProvider:
+      type: object
+      required: [id, label, defaultModel, configured, models]
+      properties:
+        id:
+          type: string
+          enum: [openai, anthropic, ollama, gemini]
+          example: openai
+        label:
+          type: string
+          example: OpenAI
+        defaultModel:
+          type: string
+          example: gpt-4o-mini
+        configured:
+          type: boolean
+          description: True when provider API key / base URL is present in env
+          example: false
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/LlmModel'
+    LlmProvidersEnvelope:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/LlmProvider'
+        meta:
+          type: object
+          additionalProperties: true
+    LlmModelsEnvelope:
+      type: object
+      required: [success, data, meta]
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/LlmModel'
+        meta:
+          type: object
+          additionalProperties: true
+    ErrorBody:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'

@@ -169,6 +169,8 @@ Generate
 
 design.md
 
+**API contracts gate (mandatory for FE-callable APIs):** before finishing plan, `specs/<feature>/contracts/` MUST include OpenAPI YAML **and** `types.ts` + `interfaces.ts` + `index.ts` (see project rule `api-contracts-complete` and Speckit plan validation gate). Do not proceed to tasks/implement with YAML-only contracts.
+
 Review
 
 Responsibilities
@@ -344,6 +346,8 @@ Review
 ↓
 
 Done
+
+**Gate before Done (mandatory):** Implementation finished **and** relevant tests for the feature pass. Then set `Status: Done`, check verified acceptance items, and refresh Notes (date / Spec / smoke). See project rule `backlog-done-after-tests`. Do **not** mark Done if tests fail or critical acceptance remains open (defer leftover work to a new Todo card if needed).
 
 Link
 

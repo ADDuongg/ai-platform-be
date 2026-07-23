@@ -14,12 +14,12 @@ export type MvpToolCode =
 export type FuturePaidProvider =
   | 'google-cse'
   | 'browserless'
-  | 'flux'
   | 'aws-s3';
 
 export type MvpToolProvider =
   | 'duckduckgo'
   | 'native-fetch'
+  | 'flux'
   | 'stub-live'
   | 'filesystem';
 
@@ -33,8 +33,13 @@ export interface ToolRuntimeEnvConfig {
   /** Future — Browserless */
   BROWSERLESS_URL?: string;
   BROWSERLESS_TOKEN?: string;
-  /** Future — Flux cloud */
+  /** Flux / BFL image-generation (provider=flux) */
   FLUX_API_KEY?: string;
+  /** Alias accepted when FLUX_API_KEY unset */
+  BFL_API_KEY?: string;
+  FLUX_BASE_URL?: string;
+  FLUX_ENDPOINT_PATH?: string;
+  FLUX_POLL_INTERVAL_MS?: number;
   /** Future — AWS S3 */
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;

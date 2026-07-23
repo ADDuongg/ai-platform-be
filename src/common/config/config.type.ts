@@ -55,8 +55,8 @@ export interface LoggerConfig {
 }
 
 export interface AgentRunnerConfig {
-  /** stub | ollama | openai | gemini */
-  mode: 'stub' | 'ollama' | 'openai' | 'gemini';
+  /** stub | ollama | openai | anthropic | gemini */
+  mode: 'stub' | 'ollama' | 'openai' | 'anthropic' | 'gemini';
   /** Default model for the active live provider (override via Agent config / Prompt modelHints). */
   defaultModel: string;
   timeoutMs: number;
@@ -64,13 +64,16 @@ export interface AgentRunnerConfig {
     baseUrl: string;
     model: string;
   };
-  /** Reserved for future OpenAI adapter */
   openai: {
     apiKey: string;
     baseUrl: string;
     model: string;
   };
-  /** Reserved for future Gemini adapter */
+  anthropic: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+  };
   gemini: {
     apiKey: string;
     model: string;
@@ -82,6 +85,18 @@ export interface ToolRuntimeConfig {
   mode: 'stub' | 'live';
   storageRoot: string;
   resultMaxBytes: number;
+  flux: {
+    apiKey: string;
+    baseUrl: string;
+    endpointPath: string;
+    pollIntervalMs: number;
+  };
+}
+
+export interface ArtifactStorageConfig {
+  /** local | s3 — MVP only implements local */
+  mode: 'local' | 's3';
+  storageRoot: string;
 }
 
 export interface AllConfigType {
@@ -94,4 +109,5 @@ export interface AllConfigType {
   logger: LoggerConfig;
   agentRunner: AgentRunnerConfig;
   toolRuntime: ToolRuntimeConfig;
+  artifactStorage: ArtifactStorageConfig;
 }

@@ -1,0 +1,238 @@
+openapi: 3.0.3
+info:
+  title: Execution Artifacts API
+  version: 1.0.0
+  description: |
+    Durable Execution deliverables materialized from Workflow `policies.outputs`
+    after successful completion. Requires `executions:read`.
+servers:
+  - url: /api/v1
+tags:
+  - name: ExecutionArtifacts
+paths:
+  /executions/{executionId}/artifacts:
+    get:
+      tags: [ExecutionArtifacts]
+      summary: List artifacts for an Execution
+      operationId: listExecutionArtifacts
+      security:
+        - bearerAuth: []
+      description: Requires `executions:read`. Empty array when none (including no outputs declared).
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+      responses:
+        '200':
+          description: Artifact list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArtifactListEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /executions/{executionId}/artifacts/{artifactId}/content:
+    get:
+      tags: [ExecutionArtifacts]
+      summary: Download or view artifact content
+      operationId: getExecutionArtifactContent
+      security:
+        - bearerAuth: []
+      description: |
+        Requires `executions:read`.
+        - Blob / single-file kinds: binary stream with Content-Type.
+        - image_set: application/json manifest (items with storage keys) unless `item` query selects one blob.
+        - inline text/json/url: application/json body from contentJson.
+        Failed artifacts → 409 `ARTIFACT_NOT_READY`.
+      parameters:
+        - $ref: '#/components/parameters/ExecutionId'
+        - $ref: '#/components/parameters/ArtifactId'
+        - name: item
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+          description: For image_set, zero-based index into manifest items (returns that blob)
+      responses:
+        '200':
+          description: Content bytes or JSON
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            image/*:
+              schema:
+                type: string
+                format: binary
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ExecutionId:
+      name: executionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ArtifactId:
+      name: artifactId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    ArtifactKind:
+      type: string
+      enum: [text, json, image, image_set, file, url]
+
+    ArtifactPersist:
+      type: string
+      enum: [inline, blob]
+
+    ArtifactStatus:
+      type: string
+      enum: [ready, failed]
+
+    ExecutionArtifact:
+      type: object
+      required:
+        - id
+        - executionId
+        - key
+        - kind
+        - persist
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        executionId:
+          type: string
+          format: uuid
+        key:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ArtifactKind'
+        label:
+          type: string
+          nullable: true
+        persist:
+          $ref: '#/components/schemas/ArtifactPersist'
+        status:
+          $ref: '#/components/schemas/ArtifactStatus'
+        contentJson:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Inline payload and/or image_set manifest
+        storageKey:
+          type: string
+          nullable: true
+        contentType:
+          type: string
+          nullable: true
+        byteSize:
+          type: integer
+          nullable: true
+        sourceNodeId:
+          type: string
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ArtifactListEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionArtifact'
+
+    ApiErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          nullable: true
+
+    ErrorEnvelope:
+      type: object
+      required: [success, error, timestamp, path]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/ApiErrorBody'
+        timestamp:
+          type: string
+          format: date-time
+        path:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Missing/invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Forbidden:
+      description: Missing `executions:read`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Execution or artifact not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Conflict:
+      description: Artifact not ready (failed materialization)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'

@@ -5,6 +5,9 @@ import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 import { assertJsonPayloadSize, canSeeCatalogDrafts } from '@common/utils';
 
+import { AuditAction, AuditDomain } from '@modules/audit/constants/audit.constants';
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { CreatePromptDto } from '../dto/create-prompt.dto';
 import { CreatePromptVersionDto } from '../dto/create-prompt-version.dto';
 import { ListPromptsQueryDto } from '../dto/list-prompts-query.dto';
@@ -22,6 +25,7 @@ export class PromptsService {
   constructor(
     private readonly promptsRepository: PromptsRepository,
     private readonly promptVersionsRepository: PromptVersionsRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreatePromptDto, actorId: string): Promise<PromptResponseDto> {
@@ -38,7 +42,7 @@ export class PromptsService {
       });
     }
 
-    return this.promptsRepository.withTransaction(async (manager) => {
+    const result = await this.promptsRepository.withTransaction(async (manager) => {
       const promptRepo = manager.getRepository(PromptEntity);
       const versionRepo = manager.getRepository(PromptVersionEntity);
 
@@ -73,6 +77,17 @@ export class PromptsService {
 
       return this.toPromptDto(savedPrompt, 1);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: AuditAction.CREATED,
+      resourceType: 'prompt',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId,
+    });
+
+    return result;
   }
 
   async list(
@@ -115,7 +130,7 @@ export class PromptsService {
     return this.toVisiblePromptDto(prompt, permissions);
   }
 
-  async update(id: string, dto: UpdatePromptDto): Promise<PromptResponseDto> {
+  async update(id: string, dto: UpdatePromptDto, actorId?: string): Promise<PromptResponseDto> {
     const prompt = await this.requireMutablePrompt(id);
 
     if (dto.name !== undefined) {
@@ -155,13 +170,25 @@ export class PromptsService {
     if (!draft) {
       draft = await this.promptVersionsRepository.findDraftByPromptId(prompt.id);
     }
-    return this.toPromptDto(prompt, draft?.version ?? null);
+    const result = this.toPromptDto(prompt, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: AuditAction.UPDATED,
+      resourceType: 'prompt',
+      resourceId: prompt.id,
+      resourceCode: prompt.code,
+      actorUserId: actorId ?? null,
+      metadata: { draftVersion: draft?.version ?? null },
+    });
+
+    return result;
   }
 
-  async publish(id: string): Promise<PromptResponseDto> {
+  async publish(id: string, actorId?: string): Promise<PromptResponseDto> {
     const prompt = await this.requireMutablePrompt(id);
 
-    return this.promptsRepository.withTransaction(async (manager) => {
+    const result = await this.promptsRepository.withTransaction(async (manager) => {
       const promptRepo = manager.getRepository(PromptEntity);
       const versionRepo = manager.getRepository(PromptVersionEntity);
 
@@ -193,6 +220,18 @@ export class PromptsService {
 
       return this.toPromptDto(lockedPrompt, null);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: AuditAction.PUBLISHED,
+      resourceType: 'prompt',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId ?? null,
+      metadata: { version: result.currentVersion },
+    });
+
+    return result;
   }
 
   async createVersion(
@@ -240,7 +279,19 @@ export class PromptsService {
       createdBy: actorId,
     });
 
-    return this.toVersionDto(draft);
+    const result = this.toVersionDto(draft);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: AuditAction.CREATED,
+      resourceType: 'prompt_version',
+      resourceId: prompt.id,
+      resourceCode: prompt.code,
+      actorUserId: actorId,
+      metadata: { version: draft.version },
+    });
+
+    return result;
   }
 
   async listVersions(
@@ -269,19 +320,29 @@ export class PromptsService {
     return this.toVersionDto(row);
   }
 
-  async enable(id: string): Promise<PromptResponseDto> {
-    return this.setEnabled(id, true);
+  async enable(id: string, actorId?: string): Promise<PromptResponseDto> {
+    return this.setEnabled(id, true, actorId);
   }
 
-  async disable(id: string): Promise<PromptResponseDto> {
-    return this.setEnabled(id, false);
+  async disable(id: string, actorId?: string): Promise<PromptResponseDto> {
+    return this.setEnabled(id, false, actorId);
   }
 
-  async softDelete(id: string): Promise<{ message: string }> {
+  async softDelete(id: string, actorId?: string): Promise<{ message: string }> {
     const prompt = await this.requireMutablePrompt(id);
     prompt.status = PromptStatus.ARCHIVED;
     await this.promptsRepository.save(prompt);
     await this.promptsRepository.softDelete(id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: AuditAction.ARCHIVED,
+      resourceType: 'prompt',
+      resourceId: prompt.id,
+      resourceCode: prompt.code,
+      actorUserId: actorId ?? null,
+    });
+
     return { message: 'Prompt archived' };
   }
 
@@ -342,12 +403,27 @@ export class PromptsService {
     return canSeeCatalogDrafts(permissions, PERMISSIONS.PROMPTS.UPDATE);
   }
 
-  private async setEnabled(id: string, enabled: boolean): Promise<PromptResponseDto> {
+  private async setEnabled(
+    id: string,
+    enabled: boolean,
+    actorId?: string,
+  ): Promise<PromptResponseDto> {
     const prompt = await this.requireMutablePrompt(id);
     prompt.enabled = enabled;
     await this.promptsRepository.save(prompt);
     const draft = await this.promptVersionsRepository.findDraftByPromptId(prompt.id);
-    return this.toPromptDto(prompt, draft?.version ?? null);
+    const result = this.toPromptDto(prompt, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.PROMPT,
+      action: enabled ? AuditAction.ENABLED : AuditAction.DISABLED,
+      resourceType: 'prompt',
+      resourceId: prompt.id,
+      resourceCode: prompt.code,
+      actorUserId: actorId ?? null,
+    });
+
+    return result;
   }
 
   private async toVisiblePromptDto(

@@ -170,6 +170,7 @@ Security requirements
 
 - Ghi log sự kiện: login success/fail, logout, role change, password change
 - Không log secret / PII thừa
+- Domain audit (Agents/Workflows/Tools/Prompts/Executions/LLM) → card riêng **Platform Domain Audit Logs** (`Status: Done`, `specs/017-domain-audit-logs`)
 
 ---
 
@@ -2328,6 +2329,189 @@ Acceptance Criteria
 
 ---
 
+## LLM Catalog
+
+Priority: High
+
+Status: Done
+
+Spec: `specs/016-llm-catalog`
+
+Notes: Implemented 2026-07-20 — static allowlist `LlmModule` + `GET /api/v1/llm/providers` / `GET /api/v1/llm/models` (`agents:read`); `configured` from env; FE persists via Agent `config.provider`/`config.model`. Contracts: OpenAPI + `types.ts` / `interfaces.ts` / `index.ts`. Unit: `pnpm exec jest src/modules/llm`.
+
+Dependency
+
+**LLM Agent Runner (Ollama)** — ✅ Done · Agent Registry — ✅ Done
+
+Goal
+
+Expose a read-only catalog of LLM providers/models so FE can select when configuring Agents — without vendor CRUD or dynamic discovery in MVP.
+
+---
+
+### Scope
+
+In scope
+
+- NestJS `src/modules/llm` — static allowlist constants, service, controller
+- `GET /api/v1/llm/providers`, `GET /api/v1/llm/models?provider=`
+- Permission: reuse `agents:read`
+- Persist selection via existing Agent config (not catalog mutations)
+- OpenAPI + typed FE contracts under `specs/016-llm-catalog/contracts/`
+- Unit tests for catalog + configured flags
+
+Out of scope
+
+- Admin CRUD for providers/models
+- Live vendor model listing / billing
+- New permission codes solely for catalog
+
+---
+
+### API Surface
+
+| Method | Path | Auth | Permission |
+|--------|------|------|------------|
+| GET | `/api/v1/llm/providers` | JWT | `agents:read` |
+| GET | `/api/v1/llm/models` | JWT | `agents:read` |
+
+---
+
+### Acceptance Criteria
+
+- Authenticated user with `agents:read` can list providers (with nested models) and models (optional provider filter)
+- Missing permission → 403; unauthenticated → 401
+- `configured` reflects env credentials/base URL presence (no secrets leaked)
+- Selection stored on Agent via existing Agent Registry APIs
+- Spec contracts complete (YAML + typed client files)
+
+---
+
+## Platform Domain Audit Logs
+
+Priority: High
+
+Status: Done
+
+Spec: `specs/017-domain-audit-logs`
+
+Notes: Implemented 2026-07-20 — `AuditModule` + `domain_audit_logs` migration; list/get `GET /api/v1/audit-logs`; `audit:read` for admin+super_admin; best-effort writer; instrumented Agents/Workflows/Tools/Prompts/Executions; LLM provider/model → `agent`/`llm_config_changed`. Validate via `pnpm migration:run && pnpm seed:rbac` then quickstart in `specs/017-domain-audit-logs/quickstart.md`. Unit: `pnpm exec jest src/modules/audit`.
+
+Dependency
+
+Authentication & Authorization — ✅ satisfied · Agent Registry — ✅ satisfied · Workflow Management / Builder — ✅ satisfied · Prompt Library — ✅ satisfied · Tool Library — ✅ satisfied · Execution — ✅ satisfied · LLM Catalog (`016`) — ✅ Done
+
+Goal
+
+Ghi nhận ai đã thay đổi / vận hành resource nghiệp vụ nào (create, update, publish, enable/disable, archive/delete, execution start/cancel/retry, agent LLM provider/model selection) để admin/operator tra cứu compliance và debug — không thay thế application logs (Winston/Pino) hay Execution step history.
+
+---
+
+### Scope
+
+In scope
+
+- NestJS module `src/modules/audit` (domain-based): entity, repository, service writer, list/get controller
+- Table `domain_audit_logs` (name finalize in plan) — append-only; no update/delete from API
+- Instrument write paths in:
+  - **Agents** — create/update/publish/enable/disable/archive (+ version create/publish); include LLM provider/model changes via Agent config
+  - **Workflows** — create/update/publish/archive (+ builder draft save if treated as mutation)
+  - **Tools** — create/update/publish/enable/disable/archive (+ version)
+  - **Prompts** — create/update/publish/enable/disable/archive (+ version)
+  - **Executions** — start / cancel / retry (not every step status tick — Execution history already covers that)
+  - **LLM Catalog** — no CRUD today (static allowlist); audit **Agent config** binding provider/model; if catalog gains admin mutations later, extend action enum
+- Read API: list + get with filters (domain, action, resourceId/code, actor userId, date range) + pagination
+- Permission: `audit:read` (admin + super_admin; optionally operator read-only — finalize in clarify)
+- Writer API internal only (`AuditLogService.record(...)`); business services call after successful mutation
+- Metadata jsonb: before/after summary or changed fields only — **never** secrets, password hashes, raw tokens, full prompt secrets, tool secret values
+- Failure policy (clarify): prefer **best-effort** write (log error, do not roll back business txn) unless clarify chooses transactional
+- Keep existing `auth_audit_logs` unchanged; do not merge auth events into domain table in MVP
+- Speckit: `specs/017-domain-audit-logs` (specify → clarify → plan → tasks)
+- Unit tests for writer + query filters; smoke that at least one domain service records on mutate
+
+Out of scope (Phase sau / feature khác)
+
+- Streaming / real-time audit websocket
+- Export CSV/SIEM integration / retention jobs / legal hold
+- Diff UI / full document versioning (version tables already exist)
+- Auditing every Execution step transition or LLM token payloads
+- Merging/migrating historical `auth_audit_logs` into domain table
+- Multi-tenant org-scoped audit partitioning
+- Immutable WORM storage / external audit warehouse
+
+---
+
+### Deliverables
+
+- Migration + `DomainAuditLogEntity` + repository
+- `AuditModule` exporting `AuditLogService` for other modules
+- Instrumentation hooks in Agents / Workflows / Tools / Prompts / Executions services (and Agent LLM config path)
+- REST: `GET /api/v1/audit-logs`, `GET /api/v1/audit-logs/:id`
+- Seed permission `audit:read` (+ role mapping)
+- OpenAPI contract under `specs/017-domain-audit-logs/contracts/`
+- Quickstart: mutate an Agent → list audit log shows actor + action + resource
+- Unit tests
+
+---
+
+### Features
+
+#### Audit — Write
+
+- `record({ domain, action, resourceType, resourceId, resourceCode?, actorUserId, ip?, userAgent?, metadata? })`
+- Domains enum: `agent` | `workflow` | `tool` | `prompt` | `execution` | `llm`
+- Actions (MVP): `created` | `updated` | `published` | `enabled` | `disabled` | `archived` | `deleted` | `execution_started` | `execution_cancelled` | `execution_retried` | `llm_config_changed` (finalize exact set in clarify)
+
+#### Audit — Read
+
+- List with filters + keyset/offset pagination (match existing list pattern)
+- Get by id
+- Admin/super_admin only via `audit:read`
+
+---
+
+### API Surface (Backlog design)
+
+| Method | Path | Auth | Permission |
+|--------|------|------|------------|
+| GET | `/api/v1/audit-logs` | JWT | `audit:read` |
+| GET | `/api/v1/audit-logs/:id` | JWT | `audit:read` |
+
+Write path: internal service only (no public POST).
+
+---
+
+### Data Model (logical)
+
+- `domain_audit_logs` — id (uuid), domain, action, resource_type, resource_id, resource_code?, actor_user_id?, ip?, user_agent?, metadata (jsonb), created_at
+- Indexes: `(domain, created_at DESC)`, `(resource_type, resource_id)`, `(actor_user_id, created_at DESC)`, `(action, created_at DESC)`
+- Reuse (read-only reference): `auth_audit_logs` stays for Auth feature
+
+---
+
+### Acceptance Criteria
+
+- Mutating Agent / Workflow / Tool / Prompt / Execution (start|cancel|retry) produces ≥1 domain audit row with correct actor + domain + action
+- Changing Agent `config.provider` / `config.model` is auditable (as `llm` domain or `agent` + `llm_config_changed` — decide in clarify)
+- List API filters by domain + date range; pagination works
+- Missing `audit:read` → 403; unauthenticated → 401
+- No secrets / password / refresh tokens in `metadata`
+- Auth audit behavior unchanged
+- Business mutation succeeds even if audit write fails (if best-effort policy chosen)
+- Spec + tests + seed permission present
+
+---
+
+### Implementation Notes (Engineering)
+
+- Follow existing module layout (`entities/`, `repositories/`, `services/`, `controllers/`, `dto/`)
+- Prefer thin helper / interceptor only if it stays explicit; default = explicit `auditLogService.record` in service after commit
+- Do not bloated metadata — store ids, codes, version numbers, changed keys; not full definition_json dumps
+- Feature branch / spec folder: `specs/017-domain-audit-logs`
+- Align with constitution: Repository Pattern, soft-delete domains already have status transitions to audit
+
+---
+
 # Phase 3 — Business Modules
 
 > **Parked (do not start).** Product focus is **Kids Fashion (Milestone 2 + Phase 2.5 Live Execution)** for now. Do not pick Blog Generation or other Phase 3 features until product re-opens Milestone 3.
@@ -2345,6 +2529,428 @@ Knowledge Assistant
 Marketing Content
 
 Customer Support
+
+---
+
+# Platform Improvements
+
+## Workflow start inputs + Builder I/O mapping (FE-led)
+
+Priority: Medium
+
+Status: Done
+
+Spec: `specs/018-workflow-start-inputs`
+
+Owner: mostly FE (`ai-platform-fe`); BE already has definition APIs — **không** cần engine Nest mới cho MVP
+
+Notes: **Phase A.1 + A.2 Done 2026-07-21** (FE). BE contract pack Done cùng ngày (`specs/018-workflow-start-inputs/contracts/`). UX: CRUD start inputs trên Workflow detail; Builder chỉ `default`; Modules form động + widgets + prefill. **Phase B** spun out → **Builder Node I/O Mapping** (`specs/019-node-io-mapping`).
+
+### Goal
+
+Ba mặt FE:
+
+1. **Workflow detail (màn chính)** — thêm/sửa/xóa start inputs trên draft (`requiredInputs` + metadata `inputSchema` trừ `default`) → Save definition → Publish  
+2. **Builder** — với các field đã có: chỉ chỉnh **`inputSchema[key].default`** (prefill Modules / Run)  
+3. **Modules Start a run (vận hành)** — đọc published definition → **gen form động** (prefill `default`) → `POST` execute  
+
+Nguồn sự thật = Workflow `definition_json.policies` trên BE. Thêm field vận hành = cấu hình data (+ Prompt / node mapping nếu LLM dùng), **không** sửa Nest logic / không sửa hardcode list field từng Modules.
+
+### Design contract (`policies`)
+
+```ts
+policies: {
+  /** BE enforce lúc Start Execution (đã có) */
+  requiredInputs: string[]
+
+  /**
+   * Optional — UI metadata (Phase A.2+).
+   * BE lưu opaque trong jsonb; không cần bảng/enum widget phía server.
+   * FE sở hữu catalog widget + render.
+   */
+  inputSchema?: Record<string, {
+    label?: string
+    widget?: 'text' | 'textarea' | 'select' | 'date'  // FE constant
+    options?: string[]   // khi widget = select
+    placeholder?: string
+    /** Prefill trên Modules Start form; không thay requiredInputs */
+    default?: string | number | boolean | null
+  }>
+}
+```
+
+| Phần | Ai sở hữu / UI đâu |
+|------|-------------------|
+| `requiredInputs` + key CRUD | BE validate start · **FE Workflow detail** |
+| `inputSchema` label/widget/options/placeholder | FE constant + render · **FE Workflow detail** |
+| `inputSchema.default` | Prefill Modules · **FE Builder only** |
+| Execution `input` / `context` | jsonb tự do — thêm key không đổi DTO |
+
+### Phase A.1 — Start fields text-only ✅ Done
+
+In scope (FE)
+
+- **Workflow detail**: UI quản lý list start input keys → ghi/đọc `policies.requiredInputs` (via `GET`/`PUT .../definition` đã có)
+- **Builder**: không CRUD keys ở A.1 (hoặc hide); default optional sau A.2
+- Modules (≥1 operator): bỏ form cứng; gen input **toàn `text`**; label = key hoặc title-case từ key
+- Submit object `{ [key]: value }` khớp `requiredInputs`
+
+BE
+
+- Không đổi logic bắt buộc; dùng `PUT/GET definition` hiện có
+- Không bắt buộc API / migration mới
+
+Out of scope A.1
+
+- Widget select/date / full `inputSchema` metadata (A.2)
+- Builder CRUD keys (đã chuyển sang Workflow detail)
+- Node `inputMapping` / `outputMapping` UI
+- Đổi Execution response shape
+
+Acceptance A.1
+
+- [x] Draft Workflow **trên màn detail**: thêm/xóa key trong `requiredInputs` → Save → Publish
+- [x] Modules Start run render đúng list từ published definition (text inputs)
+- [x] Thêm key mới (vd. `productLine`) không cần sửa list field hardcode trong FE operator; form tự hiện sau publish
+- [x] Start thiếu required key → BE reject như hiện tại
+
+### Phase A.2 — `inputSchema` + widgets + default ✅ Done
+
+In scope (FE)
+
+- **Workflow detail** khi thêm/sửa field: chọn **widget** từ FE constant `['text','textarea','select','date']`; lưu `label`, `options?`, `placeholder?` (không bắt buộc sửa `default` ở đây)
+- **Builder**: panel Start inputs / defaults — chỉ edit `policies.inputSchema[key].default` cho keys đã có trong `requiredInputs`
+- Modules: map widget → control; prefill từ `default` nếu có; thiếu/lạ widget → fallback `text`
+- `requiredInputs` vẫn là nguồn “bắt buộc lúc start”
+
+BE
+
+- Persist `inputSchema` trong jsonb `policies` (opaque); validate widget **optional** sau
+- Không bảng DB “widget types”
+
+Acceptance A.2
+
+- [x] Field `select` + `options` cấu hình trên Workflow detail, render đúng trên Modules
+- [x] Field `date` / `textarea` render đúng; unknown widget → text
+- [x] Builder đổi `default` → Save definition → Modules/Run prefill đúng giá trị mới
+
+### Phase B — Node I/O mapping UI → card riêng
+
+Xem **Builder Node I/O Mapping** bên dưới (`019-node-io-mapping`).
+
+### Khi thêm 1 field mới (sau khi A.1 sống)
+
+Checklist data (không sửa Nest):
+
+1. Builder / `PUT definition`: `requiredInputs` (+ `inputSchema` metadata trên Workflow detail; `default` trên Builder nếu A.2)
+2. Node `inputMapping` nếu step cần field (API/seed/UI Phase B)
+3. Prompt `{{field}}` + variablesSchema nếu LLM đọc (Prompt API/UI)
+4. Modules form tự gen — **không** sửa code FE per field
+
+### Dependency
+
+Workflow Builder / Management — ✅ Done (definition get/put) · Modules operator pages — ✅ dynamic form (A.1/A.2) · Prompt Library — ✅ Done (sửa template qua API)
+
+---
+
+## Builder Node I/O Mapping (FE-led)
+
+Priority: Medium
+
+Status: Done
+
+Spec: `specs/019-node-io-mapping`
+
+Owner: mostly FE (`ai-platform-fe`); BE already has draft node update APIs — **không** cần engine Nest mới cho MVP
+
+Notes: **Done 2026-07-21**. BE: contract pack + T019 path-example fix; unit tests `workflow-engine.service.spec` + `workflow-builder.service.spec` passed. FE: Builder node panel Input/Output mapping (Save mappings) verified on Sample Builder Demo (Research/Review). Acceptance checked below.
+
+### Goal
+
+Trong Workflow Builder, khi chọn một agent node trên draft:
+
+1. Xem mapping hiện tại (`inputMapping`, `outputMapping`)
+2. Thêm / sửa / xóa các cặp key (agent-input ← context; context ← agent-output)
+3. Lưu lên draft node (PATCH node hoặc PUT definition — API đã có)
+4. Publish để execution dùng mapping mới
+
+### Scope
+
+In scope (FE)
+
+- Builder **node panel / side panel**: UI edit `inputMapping` và `outputMapping` dạng key→path pairs
+- Load mapping từ draft definition; save qua update-node (hoặc replace definition)
+- UX rõ semantics: **input** = `mappedInput[left] = context[right]`; **output** = `nextContext[left] = output[right]`
+- Empty mapping = behavior hiện có của engine (không invent new engine rules)
+- Sau save: draft definition phản ánh đúng; publish đưa mapping lên published version
+
+BE
+
+- Reuse `PATCH /api/v1/workflows/{id}/nodes/{nodeId}` (và/hoặc PUT definition) — đã hỗ trợ `inputMapping` / `outputMapping`
+- Contract pack trong `specs/019-node-io-mapping/contracts/` (có thể extend từ 018 subset) cho FE
+- Không đổi Execution merge semantics; không migration DB mới
+
+Out of scope
+
+- Visual “wire” editor / expression language mới (chỉ flat key→path string maps như seed hiện tại)
+- Runtime debug panel / live context inspector trong Builder
+- Thay đổi `requiredInputs` / `inputSchema` (đã Done ở 018 A.1/A.2)
+- Auto-suggest mapping từ Prompt `variablesSchema` (nice-to-have sau)
+
+### Acceptance
+
+- [x] Designer mở Builder draft, chọn node → thấy / sửa `inputMapping` + `outputMapping`
+- [x] Save → GET draft definition chứa mapping đã sửa trên đúng `node.id`
+- [x] Publish → published definition mang mapping mới; Execution dùng mapping đó (smoke với workflow đã seed)
+- [x] Xóa hết entries trên một map → lưu được (empty object / omit theo contract hiện có)
+- [x] User không có `workflows:update` không sửa được mapping
+
+### Dependency
+
+Workflow Builder / Management — ✅ Done (node PATCH + definition) · Workflow start inputs (018 A.1/A.2) — ✅ Done · Execution context mapper — ✅ Done
+
+---
+
+## Agent / Prompt draft editors — simple forms (non-tech)
+
+Priority: Medium
+
+Status: Done
+
+Spec: `specs/020-agent-prompt-draft-editors`
+
+Owner: mostly FE (`ai-platform-fe`); BE APIs versioning/update/publish **đã có** — verify permission + contract pack; tránh raw JSON là UX mặc định
+
+Notes: 2026-07-22 — MVP Done. BE: contract pack (`contracts/`) + Agent/Prompt permission & 409 verify (T006/T007); jest smoke agents+prompts **39 passed**. FE owner confirmed MVP UI (US1–US3) in `ai-platform-fe`. Fast follow still open: US4 Prompt variables form, US5 output-rename → Builder mapping reminder.
+
+### Goal
+
+Cho phép user (designer/admin) cập nhật trên **draft** rồi publish:
+
+1. **Prompt** — `template` (+ tùy chọn `variablesSchema` / `modelHints`) qua form, không bắt sửa JSON tay  
+2. **Agent** — `inputSchema` / `outputSchema` qua **form field list** (tên, kiểu, required); FE **serialize → JSON Schema** rồi `PATCH`  
+3. Luồng rõ: **New draft version → Edit form → Save → Publish**; published vẫn immutable như hiện tại
+
+### Problem
+
+- FE detail đang read-only trên published; nút “New draft version” có nhưng thiếu editor form sau khi có draft  
+- Raw `inputSchema` / `outputSchema` / `variablesSchema` JSON không thân thiện non-tech  
+- Đổi tên field output agent mà không cập nhật Builder **output mapping** (bên phải path) → context trống — UX nên nhắc / deep-link (nice-to-have)
+
+### Scope
+
+In scope (FE)
+
+- **Prompts detail (draft)**: edit template (textarea); optional form cho variables (`{{name}}` ↔ properties + required); Save → `PATCH /api/v1/prompts/:id`  
+- **Agents detail (draft) — Input / Output**: thay JSON-first bằng form:
+  - Add/edit/remove field: `name`, `type` ∈ `string | number | boolean | object | array` (MVP có thể chỉ `string` + `number` + `boolean`), `required` checkbox  
+  - FE build JSON Schema object → gửi `inputSchema` / `outputSchema`  
+  - Toggle **Advanced: raw JSON** (optional) cho power user  
+- Wire **New draft version** → `POST .../versions`; **Publish** → `POST .../publish`  
+- Ẩn/disable Save khi không đủ permission; surface 401/403 rõ  
+- Empty / invalid field name → block save phía FE trước khi gọi API
+
+In scope (BE)
+
+- **Reuse** (không invent CRUD mới nếu đủ):
+  - Agent: `POST /agents/:id/versions`, `PATCH /agents/:id` (`inputSchema`, `outputSchema`, …), `POST /agents/:id/publish`
+  - Prompt: `POST /prompts/:id/versions`, `PATCH /prompts/:id` (`template`, `variablesSchema`, `modelHints`, …), `POST /prompts/:id/publish`
+- **Permission gate (bắt buộc verify / giữ đúng Guard)**:
+  | Action | Permission |
+  |--------|------------|
+  | Tạo draft version | `agents:update` / `prompts:update` |
+  | PATCH draft content | `agents:update` / `prompts:update` |
+  | Publish | `agents:publish` / `prompts:publish` |
+  | Read detail / versions | `agents:read` / `prompts:read` |
+- Không có permission → **403** (không partial update)  
+- Published version vẫn immutable; PATCH config khi không có draft → **409** như hiện tại (`AGENT_NO_DRAFT…` / tương đương Prompt)  
+- Contract pack FE (`types` + `interfaces` + OpenAPI subset) nếu chưa đủ cho draft edit flows  
+- Không hạ permission model xuống role hard-code trong service
+
+Out of scope
+
+- Visual JSON Schema builder đầy đủ (oneOf, $ref, nested sâu) — MVP flat properties  
+- Đổi Execution / context mapper  
+- Tự động sửa Workflow node `outputMapping` khi đổi tên field Agent (có thể warn trên UI thôi)  
+- Multi-tenant / ABAC mới
+
+### UX contract (FE form → schema)
+
+Ví dụ output fields trên form:
+
+| Name | Type | Required |
+|------|------|----------|
+| `final_result` | string | ✓ |
+
+→ FE gửi:
+
+```json
+{
+  "type": "object",
+  "required": ["final_result"],
+  "properties": {
+    "final_result": { "type": "string" }
+  }
+}
+```
+
+Prompt variables form tương tự → `variablesSchema` (không nhầm với Agent `outputSchema`).
+
+### Acceptance
+
+- [x] User có `prompts:update` tạo draft Prompt → sửa template trên form → Save → GET draft thấy nội dung mới; thiếu permission → không Save / API 403  
+- [x] User có `agents:update` tạo draft Agent → thêm/sửa/xóa field trên form Input & Output → Save → draft `inputSchema`/`outputSchema` đúng JSON Schema gen từ form  
+- [x] Publish Agent/Prompt chỉ với `*:publish`; sau publish bản cũ immutable; edit tiếp phải New draft  
+- [x] Non-tech path **không bắt** mở raw JSON (Advanced optional)  
+- [x] Viewer / thiếu `update` không sửa được draft content  
+- [ ] (Nice) Sau đổi output field name, UI nhắc cập nhật Builder node output mapping cho khớp
+
+### Dependency
+
+Agent Registry — ✅ Done (versioning + PATCH schemas) · Prompt Library — ✅ Done (versioning + PATCH template) · Auth + RBAC — ✅ Done · Builder Node I/O Mapping (`019`) — ✅ Done
+
+---
+
+## Execution deliverables / artifacts (extensible outputs)
+
+Priority: Medium
+
+Status: Done
+
+Spec: `specs/021-execution-artifacts`
+
+Owner: mostly BE; FE Modules/Execution detail consume list artifacts theo `kind`
+
+Notes: 2026-07-22 — MVP Done. Migration `execution_artifacts`; `ArtifactMaterializerService` on COMPLETED (best-effort); local `ArtifactBlobStore` (`ARTIFACT_STORAGE_ROOT`, S3 TODO); `GET /executions/:id/artifacts` + `/content` (`executions:read`); Kids Fashion seed `policies.outputs` for `rawGenerations`. Jest materializer **6 passed** (+ executions/env). FE client (T023) still open in `ai-platform-fe`.
+
+### Goal
+
+Khi Execution **completed**, materialize các **deliverables** đã khai báo trên Workflow definition thành bản ghi bền + (nếu cần) file trên storage — FE đọc qua API artifacts, không phụ thuộc URL vendor tạm.
+
+Mọi Workflow chỉ cần khai báo `outputs[]`; thêm loại output mới = thêm `kind` + strategy persist, không thêm bảng per-business.
+
+### Design contract (`policies.outputs`)
+
+```ts
+policies: {
+  requiredInputs?: string[]
+  inputSchema?: Record<string, unknown>
+  /** Deliverables taken from final shared context after run completes */
+  outputs?: Array<{
+    key: string           // context path / key, e.g. "rawGenerations" | "emailDraft"
+    kind: 'text' | 'json' | 'image' | 'image_set' | 'file' | 'url'
+    label?: string
+    /** inline = DB only; blob = download/persist bytes then store storageKey */
+    persist: 'inline' | 'blob'
+  }>
+}
+```
+
+Ví dụ Kids Fashion:
+
+```json
+{
+  "outputs": [
+    {
+      "key": "rawGenerations",
+      "kind": "image_set",
+      "label": "Generated looks",
+      "persist": "blob"
+    }
+  ]
+}
+```
+
+Ví dụ Workflow gửi mail sau này:
+
+```json
+{
+  "outputs": [
+    {
+      "key": "emailDraft",
+      "kind": "text",
+      "label": "Customer email",
+      "persist": "inline"
+    }
+  ]
+}
+```
+
+### Data model (logical)
+
+`execution_artifacts`
+
+- id, execution_id, key, kind, label
+- content_json (text/json nhỏ — `persist: inline`)
+- storage_key, content_type, byte_size (file — `persist: blob`)
+- source_node_id? (optional)
+- created_at
+
+Indexes: `(execution_id)`, `(execution_id, key)` unique nếu 1 key / run.
+
+### Storage strategy (MVP → AWS)
+
+**MVP — local filesystem**
+
+- Root: reuse / align `TOOL_STORAGE_ROOT` (vd. `.data/tool-storage`) hoặc `.data/execution-artifacts`
+- Path gợi ý: `{root}/executions/{executionId}/{artifactId}/…`
+- Có thể reuse / extend `ObjectStorageAdapter` (local put/get)
+
+**Later — AWS S3 (hoặc tương đương)**
+
+- Implement cùng interface `BlobStore` / strategy `s3`
+- Trong code MVP: **comment rõ chỗ swap sang AWS** (TODO + interface), không bắt buộc ship S3 ngay
+- Env sau này: `ARTIFACT_STORAGE=local|s3`, `AWS_S3_BUCKET`, …
+
+Không coi URL BFL / CDN vendor là nguồn sự thật lâu dài: `persist: blob` phải **download ngay** khi Ready rồi lưu bản mình.
+
+### Scope
+
+In scope (BE)
+
+- Schema / migration `execution_artifacts`
+- Đọc `policies.outputs` từ published definition khi Execution → `completed`
+- `ArtifactMaterializer`:
+  - `inline` → ghi `content_json` từ `context[key]`
+  - `blob` / `image` / `image_set` → resolve URL(s) trong value → download → **local** put → lưu `storage_key`
+- API đọc: vd. `GET /api/v1/executions/:id/artifacts` (+ optionally stream/download by id)
+- Permission: reuse `executions:read` (hoặc tương đương hiện có)
+- Seed `kids-fashion-research-to-image`: thêm `policies.outputs` cho `rawGenerations`
+- Contract pack FE (`types` + `interfaces` + OpenAPI) nếu FE gọi list/download
+- Comment trong code local store: chỗ sẽ thay bằng AWS S3
+
+In scope (FE — có thể song song / sau BE)
+
+- Execution detail / Modules: render artifacts theo `kind` (img vs text), không hardcode một Workflow
+
+Out of scope (MVP)
+
+- AWS S3 upload thật (chỉ design + TODO comment)
+- Gửi mail / webhook delivery tự động
+- Versioning / soft-delete artifacts phức tạp
+- CDN signed URL public dài hạn (có thể phase sau)
+- Đổi Execution graph / context mapper semantics
+
+### Acceptance
+
+- [x] Workflow có `policies.outputs` với `persist: inline` → sau completed có row artifact, `content_json` khớp context
+- [x] Workflow kids fashion `rawGenerations` + `persist: blob` → file nằm dưới local storage root; DB có `storage_key`; không phụ thuộc link BFL còn sống
+- [x] `GET .../executions/:id/artifacts` trả list theo execution; thiếu `executions:read` → 403
+- [x] Workflow không khai báo `outputs` → completed vẫn OK, không bắt buộc artifact (backward compatible)
+- [x] Code local blob store có comment / seam rõ để sau này thay AWS S3
+- [x] Spec + tests (materialize inline + blob local) + seed outputs
+
+### Implementation Notes (Engineering)
+
+- Follow module layout hiện có; tránh Active Record
+- Materialize **best-effort hoặc fail execution?** — prefer: completed + artifact errors recorded (clarify khi specify); tối thiểu log + không nuốt im
+- Image_set: materialize từng item có `assetUrl` http(s)
+- FE contract: `kind` discriminator để Modules render
+- Feature folder gợi ý: `specs/021-execution-artifacts`
+
+### Dependency
+
+Workflow Execution — ✅ Done · Tool runtime / object-storage adapter — ✅ partial (local) · Kids Fashion seed pipeline — ✅ seeded · Workflow `policies` jsonb — ✅ Done
 
 ---
 
@@ -2373,3 +2979,5 @@ SSO / OAuth2
 Multi-tenant Organizations
 
 MFA
+
+Audit export / SIEM / retention (extends **Platform Domain Audit Logs** after MVP read/write)

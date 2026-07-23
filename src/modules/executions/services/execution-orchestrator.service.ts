@@ -12,6 +12,7 @@ import { ExecutionStatus, ExecutionStepStatus } from '../enums';
 import { ExecutionStepsRepository } from '../repositories/execution-steps.repository';
 import { ExecutionsRepository } from '../repositories/executions.repository';
 import type { AgentRunner } from './agent-runner.types';
+import { ArtifactMaterializerService } from './artifact-materializer.service';
 import { applyInputMapping, applyOutputMapping } from './context-mapper';
 import { WorkflowEngineService } from './workflow-engine.service';
 
@@ -28,6 +29,7 @@ export class ExecutionOrchestratorService {
     @Inject(AGENT_RUNNER) private readonly agentRunner: AgentRunner,
     private readonly agentsRepository: AgentsRepository,
     private readonly agentVersionsRepository: AgentVersionsRepository,
+    private readonly artifactMaterializer: ArtifactMaterializerService,
   ) {}
 
   async run(executionId: string): Promise<void> {
@@ -242,5 +244,17 @@ export class ExecutionOrchestratorService {
     execution.completedAt = new Date();
     execution.errorJson = errorJson;
     await this.executionsRepository.save(execution);
+
+    if (status === ExecutionStatus.COMPLETED) {
+      // Best-effort: materializer catches internally and must never flip COMPLETED → FAILED.
+      try {
+        await this.artifactMaterializer.materializeForCompletedExecution(execution);
+      } catch (error) {
+        this.logger.error(
+          `Unexpected artifact materializer throw for execution ${execution.id}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
   }
 }

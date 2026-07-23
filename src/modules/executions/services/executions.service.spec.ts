@@ -19,6 +19,7 @@ describe('ExecutionsService', () => {
   let agentsRepository: Record<string, jest.Mock>;
   let agentVersionsRepository: Record<string, jest.Mock>;
   let executionQueue: { add: jest.Mock };
+  let auditLogService: Record<string, jest.Mock>;
 
   const publishedWorkflow = {
     id: 'wf-1',
@@ -90,6 +91,7 @@ describe('ExecutionsService', () => {
       }),
     };
     executionQueue = { add: jest.fn().mockResolvedValue(undefined) };
+    auditLogService = { record: jest.fn().mockResolvedValue(undefined) };
 
     service = new ExecutionsService(
       executionsRepository as never,
@@ -101,6 +103,7 @@ describe('ExecutionsService', () => {
       agentsRepository as never,
       agentVersionsRepository as never,
       executionQueue as never,
+      auditLogService as never,
     );
   });
 

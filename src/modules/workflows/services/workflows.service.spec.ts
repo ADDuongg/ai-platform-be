@@ -3,6 +3,8 @@ import { HttpStatus } from '@nestjs/common';
 import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { WorkflowEntity } from '../entities/workflow.entity';
 import { WorkflowVersionEntity } from '../entities/workflow-version.entity';
 import { WorkflowStatus, WorkflowVersionStatus } from '../enums';
@@ -14,6 +16,7 @@ describe('WorkflowsService', () => {
   let service: WorkflowsService;
   let workflowsRepository: jest.Mocked<WorkflowsRepository>;
   let workflowVersionsRepository: jest.Mocked<WorkflowVersionsRepository>;
+  let auditLogService: jest.Mocked<AuditLogService>;
 
   const designerPermissions = [
     PERMISSIONS.WORKFLOWS.READ,
@@ -84,7 +87,11 @@ describe('WorkflowsService', () => {
       save: jest.fn(),
     } as unknown as jest.Mocked<WorkflowVersionsRepository>;
 
-    service = new WorkflowsService(workflowsRepository, workflowVersionsRepository);
+    auditLogService = {
+      record: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<AuditLogService>;
+
+    service = new WorkflowsService(workflowsRepository, workflowVersionsRepository, auditLogService);
   });
 
   describe('visibility', () => {

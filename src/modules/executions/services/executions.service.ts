@@ -6,6 +6,8 @@ import { Queue } from 'bullmq';
 import { ERROR_CODES } from '@common/constants';
 import { AppException } from '@common/exceptions';
 import { jsonPayloadByteSize } from '@common/utils';
+import { AuditAction, AuditDomain } from '@modules/audit/constants/audit.constants';
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
 import { AgentsService } from '@modules/agents/services/agents.service';
 import { AgentVersionsRepository } from '@modules/agents/repositories/agent-versions.repository';
 import { AgentsRepository } from '@modules/agents/repositories/agents.repository';
@@ -47,6 +49,7 @@ export class ExecutionsService {
     private readonly agentsRepository: AgentsRepository,
     private readonly agentVersionsRepository: AgentVersionsRepository,
     @InjectQueue(EXECUTION_QUEUE) private readonly executionQueue: Queue,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async startFromWorkflow(
@@ -101,7 +104,7 @@ export class ExecutionsService {
     return this.toStepDto(step);
   }
 
-  async cancel(id: string): Promise<ExecutionResponseDto> {
+  async cancel(id: string, actorId?: string): Promise<ExecutionResponseDto> {
     const execution = await this.requireExecution(id);
     if (
       execution.status !== ExecutionStatus.PENDING &&
@@ -117,10 +120,21 @@ export class ExecutionsService {
     execution.completedAt = new Date();
     await this.executionsRepository.save(execution);
     await this.executionStepsRepository.cancelPendingSteps(id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.EXECUTION,
+      action: AuditAction.EXECUTION_CANCELLED,
+      resourceType: 'execution',
+      resourceId: execution.id,
+      resourceCode: execution.workflowCode ?? null,
+      actorUserId: actorId ?? null,
+      metadata: { workflowId: execution.workflowId, workflowVersion: execution.workflowVersion },
+    });
+
     return this.toExecutionDto(execution);
   }
 
-  async retry(id: string): Promise<ExecutionResponseDto> {
+  async retry(id: string, actorId?: string): Promise<ExecutionResponseDto> {
     const execution = await this.requireExecution(id);
     if (execution.status !== ExecutionStatus.FAILED) {
       throw new AppException('Only failed executions can be retried', HttpStatus.CONFLICT, {
@@ -150,6 +164,17 @@ export class ExecutionsService {
     await this.executionsRepository.save(execution);
 
     await this.enqueueRun(execution.id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.EXECUTION,
+      action: AuditAction.EXECUTION_RETRIED,
+      resourceType: 'execution',
+      resourceId: execution.id,
+      resourceCode: execution.workflowCode ?? null,
+      actorUserId: actorId ?? null,
+      metadata: { workflowId: execution.workflowId, workflowVersion: execution.workflowVersion },
+    });
+
     return this.toExecutionDto(execution);
   }
 
@@ -253,6 +278,16 @@ export class ExecutionsService {
 
       await this.enqueueRun(execution.id);
     }
+
+    await this.auditLogService.record({
+      domain: AuditDomain.EXECUTION,
+      action: AuditAction.EXECUTION_STARTED,
+      resourceType: 'execution',
+      resourceId: execution.id,
+      resourceCode: workflow.code,
+      actorUserId: startedBy,
+      metadata: { workflowId: workflow.id, workflowVersion: targetVersion },
+    });
 
     return this.toExecutionDto(execution);
   }

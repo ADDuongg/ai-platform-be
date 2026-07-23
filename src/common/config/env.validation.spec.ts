@@ -25,6 +25,8 @@ describe('envValidationSchema AGENT_RUNNER + TOOL_RUNTIME', () => {
     expect(value.TOOL_RUNTIME).toBe('stub');
     expect(value.TOOL_STORAGE_ROOT).toBe('.data/tool-storage');
     expect(value.TOOL_RESULT_MAX_BYTES).toBe(262_144);
+    expect(value.ARTIFACT_STORAGE).toBe('local');
+    expect(value.ARTIFACT_STORAGE_ROOT).toBe('.data/execution-artifacts');
   });
 
   it('accepts ollama mode', () => {
@@ -48,8 +50,8 @@ describe('envValidationSchema AGENT_RUNNER + TOOL_RUNTIME', () => {
     expect(value.TOOL_STORAGE_ROOT).toBe('/tmp/tools');
   });
 
-  it('accepts reserved openai/gemini modes', () => {
-    for (const mode of ['openai', 'gemini'] as const) {
+  it('accepts openai/anthropic/gemini modes', () => {
+    for (const mode of ['openai', 'anthropic', 'gemini'] as const) {
       const { value, error } = envValidationSchema.validate({
         ...base,
         AGENT_RUNNER: mode,
@@ -57,6 +59,18 @@ describe('envValidationSchema AGENT_RUNNER + TOOL_RUNTIME', () => {
       expect(error).toBeUndefined();
       expect(value.AGENT_RUNNER).toBe(mode);
     }
+  });
+
+  it('accepts empty anthropic/openai/flux api keys', () => {
+    const { error } = envValidationSchema.validate({
+      ...base,
+      OPENAI_API_KEY: '',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_MODEL: 'claude-sonnet-4-20250514',
+      FLUX_API_KEY: '',
+      BFL_API_KEY: '',
+    });
+    expect(error).toBeUndefined();
   });
 
   it('rejects invalid AGENT_RUNNER', () => {

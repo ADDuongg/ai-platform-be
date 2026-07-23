@@ -29,13 +29,16 @@ export interface ToolRuntimeConfigView {
   mvpProviders: {
     'web-search': 'duckduckgo';
     'web-browser': 'native-fetch';
-    'image-generation': 'stub-live';
+    'image-generation': 'flux';
     'object-storage': 'filesystem';
+  };
+  /** Offline/CI fallback for image-generation when Flux key is unset */
+  offlineProviders: {
+    'image-generation': 'stub-live';
   };
   futureProvidersCommentedOnly: {
     'web-search': 'google-cse';
     'web-browser': 'browserless';
-    'image-generation': 'flux';
     'object-storage': 'aws-s3';
   };
   notes: string[];

@@ -85,39 +85,52 @@ export class ToolsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateToolDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<ToolResponseDto> {
-    return this.toolsService.update(id, dto);
+    return this.toolsService.update(id, dto, user.sub);
   }
 
   @Delete(':id')
   @Permissions(PERMISSIONS.TOOLS.DELETE)
   @ApiOperation({ summary: 'Soft-delete (archive) Tool' })
-  async softDelete(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
-    return this.toolsService.softDelete(id);
+  async softDelete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.toolsService.softDelete(id, user.sub);
   }
 
   @Post(':id/publish')
   @Permissions(PERMISSIONS.TOOLS.PUBLISH)
   @ApiOperation({ summary: 'Publish current draft version' })
   @ApiOkResponse({ type: ToolResponseDto })
-  async publish(@Param('id', ParseUUIDPipe) id: string): Promise<ToolResponseDto> {
-    return this.toolsService.publish(id);
+  async publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ToolResponseDto> {
+    return this.toolsService.publish(id, user.sub);
   }
 
   @Post(':id/enable')
   @Permissions(PERMISSIONS.TOOLS.UPDATE)
   @ApiOperation({ summary: 'Enable Tool' })
   @ApiOkResponse({ type: ToolResponseDto })
-  async enable(@Param('id', ParseUUIDPipe) id: string): Promise<ToolResponseDto> {
-    return this.toolsService.enable(id);
+  async enable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ToolResponseDto> {
+    return this.toolsService.enable(id, user.sub);
   }
 
   @Post(':id/disable')
   @Permissions(PERMISSIONS.TOOLS.UPDATE)
   @ApiOperation({ summary: 'Disable Tool' })
   @ApiOkResponse({ type: ToolResponseDto })
-  async disable(@Param('id', ParseUUIDPipe) id: string): Promise<ToolResponseDto> {
-    return this.toolsService.disable(id);
+  async disable(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<ToolResponseDto> {
+    return this.toolsService.disable(id, user.sub);
   }
 
   @Get(':id/versions')

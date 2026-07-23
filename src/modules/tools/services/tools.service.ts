@@ -5,6 +5,9 @@ import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 import { assertJsonPayloadSize, canSeeCatalogDrafts } from '@common/utils';
 
+import { AuditAction, AuditDomain } from '@modules/audit/constants/audit.constants';
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { CreateToolDto } from '../dto/create-tool.dto';
 import { CreateToolVersionDto } from '../dto/create-tool-version.dto';
 import { ListToolsQueryDto } from '../dto/list-tools-query.dto';
@@ -27,6 +30,7 @@ export class ToolsService {
   constructor(
     private readonly toolsRepository: ToolsRepository,
     private readonly toolVersionsRepository: ToolVersionsRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreateToolDto, actorId: string): Promise<ToolResponseDto> {
@@ -43,7 +47,7 @@ export class ToolsService {
       });
     }
 
-    return this.toolsRepository.withTransaction(async (manager) => {
+    const result = await this.toolsRepository.withTransaction(async (manager) => {
       const toolRepo = manager.getRepository(ToolEntity);
       const versionRepo = manager.getRepository(ToolVersionEntity);
 
@@ -79,6 +83,18 @@ export class ToolsService {
 
       return this.toToolDto(savedTool, 1);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: AuditAction.CREATED,
+      resourceType: 'tool',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId,
+      metadata: { toolType: result.toolType },
+    });
+
+    return result;
   }
 
   async list(
@@ -120,7 +136,7 @@ export class ToolsService {
     return this.toVisibleToolDto(tool, permissions);
   }
 
-  async update(id: string, dto: UpdateToolDto): Promise<ToolResponseDto> {
+  async update(id: string, dto: UpdateToolDto, actorId?: string): Promise<ToolResponseDto> {
     const tool = await this.requireMutableTool(id);
 
     if (dto.name !== undefined) {
@@ -156,13 +172,25 @@ export class ToolsService {
     if (!draft) {
       draft = await this.toolVersionsRepository.findDraftByToolId(tool.id);
     }
-    return this.toToolDto(tool, draft?.version ?? null);
+    const result = this.toToolDto(tool, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: AuditAction.UPDATED,
+      resourceType: 'tool',
+      resourceId: tool.id,
+      resourceCode: tool.code,
+      actorUserId: actorId ?? null,
+      metadata: { draftVersion: draft?.version ?? null },
+    });
+
+    return result;
   }
 
-  async publish(id: string): Promise<ToolResponseDto> {
+  async publish(id: string, actorId?: string): Promise<ToolResponseDto> {
     const tool = await this.requireMutableTool(id);
 
-    return this.toolsRepository.withTransaction(async (manager) => {
+    const result = await this.toolsRepository.withTransaction(async (manager) => {
       const toolRepo = manager.getRepository(ToolEntity);
       const versionRepo = manager.getRepository(ToolVersionEntity);
 
@@ -194,6 +222,18 @@ export class ToolsService {
 
       return this.toToolDto(lockedTool, null);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: AuditAction.PUBLISHED,
+      resourceType: 'tool',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId ?? null,
+      metadata: { version: result.currentVersion },
+    });
+
+    return result;
   }
 
   async createVersion(
@@ -243,7 +283,19 @@ export class ToolsService {
       createdBy: actorId,
     });
 
-    return this.toVersionDto(draft);
+    const result = this.toVersionDto(draft);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: AuditAction.CREATED,
+      resourceType: 'tool_version',
+      resourceId: tool.id,
+      resourceCode: tool.code,
+      actorUserId: actorId,
+      metadata: { version: draft.version },
+    });
+
+    return result;
   }
 
   async listVersions(
@@ -272,19 +324,29 @@ export class ToolsService {
     return this.toVersionDto(row);
   }
 
-  async enable(id: string): Promise<ToolResponseDto> {
-    return this.setEnabled(id, true);
+  async enable(id: string, actorId?: string): Promise<ToolResponseDto> {
+    return this.setEnabled(id, true, actorId);
   }
 
-  async disable(id: string): Promise<ToolResponseDto> {
-    return this.setEnabled(id, false);
+  async disable(id: string, actorId?: string): Promise<ToolResponseDto> {
+    return this.setEnabled(id, false, actorId);
   }
 
-  async softDelete(id: string): Promise<{ message: string }> {
+  async softDelete(id: string, actorId?: string): Promise<{ message: string }> {
     const tool = await this.requireMutableTool(id);
     tool.status = ToolStatus.ARCHIVED;
     await this.toolsRepository.save(tool);
     await this.toolsRepository.softDelete(id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: AuditAction.ARCHIVED,
+      resourceType: 'tool',
+      resourceId: tool.id,
+      resourceCode: tool.code,
+      actorUserId: actorId ?? null,
+    });
+
     return { message: 'Tool archived' };
   }
 
@@ -350,12 +412,27 @@ export class ToolsService {
     return canSeeCatalogDrafts(permissions, PERMISSIONS.TOOLS.UPDATE);
   }
 
-  private async setEnabled(id: string, enabled: boolean): Promise<ToolResponseDto> {
+  private async setEnabled(
+    id: string,
+    enabled: boolean,
+    actorId?: string,
+  ): Promise<ToolResponseDto> {
     const tool = await this.requireMutableTool(id);
     tool.enabled = enabled;
     await this.toolsRepository.save(tool);
     const draft = await this.toolVersionsRepository.findDraftByToolId(tool.id);
-    return this.toToolDto(tool, draft?.version ?? null);
+    const result = this.toToolDto(tool, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.TOOL,
+      action: enabled ? AuditAction.ENABLED : AuditAction.DISABLED,
+      resourceType: 'tool',
+      resourceId: tool.id,
+      resourceCode: tool.code,
+      actorUserId: actorId ?? null,
+    });
+
+    return result;
   }
 
   private async toVisibleToolDto(

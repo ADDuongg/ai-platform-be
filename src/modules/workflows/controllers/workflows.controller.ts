@@ -75,23 +75,30 @@ export class WorkflowsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateWorkflowDto,
+    @CurrentUser() user: JwtPayload,
   ): Promise<WorkflowResponseDto> {
-    return this.workflowsService.update(id, dto);
+    return this.workflowsService.update(id, dto, user.sub);
   }
 
   @Delete(':id')
   @Permissions(PERMISSIONS.WORKFLOWS.DELETE)
   @ApiOperation({ summary: 'Soft-delete (archive) Workflow' })
-  async softDelete(@Param('id', ParseUUIDPipe) id: string): Promise<{ message: string }> {
-    return this.workflowsService.softDelete(id);
+  async softDelete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<{ message: string }> {
+    return this.workflowsService.softDelete(id, user.sub);
   }
 
   @Post(':id/publish')
   @Permissions(PERMISSIONS.WORKFLOWS.PUBLISH)
   @ApiOperation({ summary: 'Publish current draft version' })
   @ApiOkResponse({ type: WorkflowResponseDto })
-  async publish(@Param('id', ParseUUIDPipe) id: string): Promise<WorkflowResponseDto> {
-    return this.workflowsService.publish(id);
+  async publish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: JwtPayload,
+  ): Promise<WorkflowResponseDto> {
+    return this.workflowsService.publish(id, user.sub);
   }
 
   @Post(':id/clone')

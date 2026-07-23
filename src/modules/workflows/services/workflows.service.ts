@@ -5,6 +5,9 @@ import { ERROR_CODES, PERMISSIONS } from '@common/constants';
 import { AppException } from '@common/exceptions';
 import { assertDefinitionJsonPayloadSize, canSeeCatalogDrafts } from '@common/utils';
 
+import { AuditAction, AuditDomain } from '@modules/audit/constants/audit.constants';
+import { AuditLogService } from '@modules/audit/services/audit-log.service';
+
 import { CloneWorkflowDto } from '../dto/clone-workflow.dto';
 import { CreateWorkflowDto } from '../dto/create-workflow.dto';
 import { CreateWorkflowVersionDto } from '../dto/create-workflow-version.dto';
@@ -30,6 +33,7 @@ export class WorkflowsService {
   constructor(
     private readonly workflowsRepository: WorkflowsRepository,
     private readonly workflowVersionsRepository: WorkflowVersionsRepository,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async create(dto: CreateWorkflowDto, actorId: string): Promise<WorkflowResponseDto> {
@@ -45,7 +49,7 @@ export class WorkflowsService {
       });
     }
 
-    return this.workflowsRepository.withTransaction(async (manager) => {
+    const result = await this.workflowsRepository.withTransaction(async (manager) => {
       const workflowRepo = manager.getRepository(WorkflowEntity);
       const versionRepo = manager.getRepository(WorkflowVersionEntity);
 
@@ -76,6 +80,17 @@ export class WorkflowsService {
 
       return this.toWorkflowDto(savedWorkflow, 1);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.CREATED,
+      resourceType: 'workflow',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId,
+    });
+
+    return result;
   }
 
   async list(
@@ -121,7 +136,7 @@ export class WorkflowsService {
     return this.toWorkflowDto(workflow, draft?.version ?? null);
   }
 
-  async update(id: string, dto: UpdateWorkflowDto): Promise<WorkflowResponseDto> {
+  async update(id: string, dto: UpdateWorkflowDto, actorId?: string): Promise<WorkflowResponseDto> {
     const workflow = await this.requireMutableWorkflow(id);
     const hasDefinitionChange = dto.definition !== undefined || dto.changelog !== undefined;
 
@@ -156,13 +171,25 @@ export class WorkflowsService {
     if (!draft) {
       draft = await this.workflowVersionsRepository.findDraftByWorkflowId(workflow.id);
     }
-    return this.toWorkflowDto(workflow, draft?.version ?? null);
+    const result = this.toWorkflowDto(workflow, draft?.version ?? null);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.UPDATED,
+      resourceType: 'workflow',
+      resourceId: workflow.id,
+      resourceCode: workflow.code,
+      actorUserId: actorId ?? null,
+      metadata: { draftVersion: draft?.version ?? null },
+    });
+
+    return result;
   }
 
-  async publish(id: string): Promise<WorkflowResponseDto> {
+  async publish(id: string, actorId?: string): Promise<WorkflowResponseDto> {
     const workflow = await this.requireMutableWorkflow(id);
 
-    return this.workflowsRepository.withTransaction(async (manager) => {
+    const result = await this.workflowsRepository.withTransaction(async (manager) => {
       const workflowRepo = manager.getRepository(WorkflowEntity);
       const versionRepo = manager.getRepository(WorkflowVersionEntity);
 
@@ -194,6 +221,18 @@ export class WorkflowsService {
 
       return this.toWorkflowDto(locked, null);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.PUBLISHED,
+      resourceType: 'workflow',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId ?? null,
+      metadata: { version: result.currentVersion },
+    });
+
+    return result;
   }
 
   async createVersion(
@@ -238,7 +277,19 @@ export class WorkflowsService {
       createdBy: actorId,
     });
 
-    return this.toVersionDto(draft);
+    const result = this.toVersionDto(draft);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.CREATED,
+      resourceType: 'workflow_version',
+      resourceId: workflow.id,
+      resourceCode: workflow.code,
+      actorUserId: actorId,
+      metadata: { version: draft.version },
+    });
+
+    return result;
   }
 
   async listVersions(
@@ -296,7 +347,7 @@ export class WorkflowsService {
       });
     }
 
-    return this.workflowsRepository.withTransaction(async (manager) => {
+    const result = await this.workflowsRepository.withTransaction(async (manager) => {
       const workflowRepo = manager.getRepository(WorkflowEntity);
       const versionRepo = manager.getRepository(WorkflowVersionEntity);
 
@@ -327,13 +378,35 @@ export class WorkflowsService {
 
       return this.toWorkflowDto(saved, 1);
     });
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.CREATED,
+      resourceType: 'workflow',
+      resourceId: result.id,
+      resourceCode: result.code,
+      actorUserId: actorId,
+      metadata: { clonedFrom: id },
+    });
+
+    return result;
   }
 
-  async softDelete(id: string): Promise<{ message: string }> {
+  async softDelete(id: string, actorId?: string): Promise<{ message: string }> {
     const workflow = await this.requireMutableWorkflow(id);
     workflow.status = WorkflowStatus.ARCHIVED;
     await this.workflowsRepository.save(workflow);
     await this.workflowsRepository.softDelete(id);
+
+    await this.auditLogService.record({
+      domain: AuditDomain.WORKFLOW,
+      action: AuditAction.ARCHIVED,
+      resourceType: 'workflow',
+      resourceId: workflow.id,
+      resourceCode: workflow.code,
+      actorUserId: actorId ?? null,
+    });
+
     return { message: 'Workflow archived' };
   }
 

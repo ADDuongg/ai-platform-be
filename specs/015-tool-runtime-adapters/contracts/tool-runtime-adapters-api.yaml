@@ -201,7 +201,13 @@ components:
           description: Future only — commented in MVP
         FLUX_API_KEY:
           type: string
-          description: Future only — commented in MVP
+          description: BFL API key for image-generation provider=flux (alias BFL_API_KEY)
+        FLUX_BASE_URL:
+          type: string
+          description: Default https://api.bfl.ai
+        FLUX_ENDPOINT_PATH:
+          type: string
+          description: Default /v1/flux-2-pro
         AWS_ACCESS_KEY_ID:
           type: string
           description: Future only — commented in MVP
