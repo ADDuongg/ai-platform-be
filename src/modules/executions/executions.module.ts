@@ -56,6 +56,15 @@ import { ImageGenerationAdapter } from './tools/adapters/image-generation.adapte
 import { ObjectStorageAdapter } from './tools/adapters/object-storage.adapter';
 import { WebBrowserAdapter } from './tools/adapters/web-browser.adapter';
 import { WebSearchAdapter } from './tools/adapters/web-search.adapter';
+import {
+  DuckDuckGoSearchProvider,
+  GeminiSearchProvider,
+  GoogleCseSearchProvider,
+  SerpApiSearchProvider,
+  TavilySearchProvider,
+  WEB_SEARCH_PROVIDER_REGISTRY,
+  WebSearchProviderRegistry,
+} from './tools/adapters/web-search';
 import { ToolAdapterRegistry } from './tools/tool-registry';
 import { ToolInvokerService } from './tools/tool-invoker.service';
 
@@ -73,6 +82,16 @@ function resolveRunnerMode(config: ConfigService<AllConfigType>): AgentRunnerMod
     throw new Error(`Unsupported AGENT_RUNNER=${mode}. Use stub|ollama|openai|anthropic|gemini`);
   }
   return mode;
+}
+
+function createWebSearchProviderRegistry(
+  serpapi: SerpApiSearchProvider,
+  tavily: TavilySearchProvider,
+  duckduckgo: DuckDuckGoSearchProvider,
+  googleCse: GoogleCseSearchProvider,
+  gemini: GeminiSearchProvider,
+): WebSearchProviderRegistry {
+  return new WebSearchProviderRegistry([serpapi, tavily, duckduckgo, googleCse, gemini]);
 }
 
 function createToolAdapterRegistry(
@@ -145,6 +164,22 @@ function createAgentRunner(
     OpenAiChatProvider,
     AnthropicChatProvider,
     GeminiChatProvider,
+    SerpApiSearchProvider,
+    TavilySearchProvider,
+    DuckDuckGoSearchProvider,
+    GoogleCseSearchProvider,
+    GeminiSearchProvider,
+    {
+      provide: WEB_SEARCH_PROVIDER_REGISTRY,
+      inject: [
+        SerpApiSearchProvider,
+        TavilySearchProvider,
+        DuckDuckGoSearchProvider,
+        GoogleCseSearchProvider,
+        GeminiSearchProvider,
+      ],
+      useFactory: createWebSearchProviderRegistry,
+    },
     WebSearchAdapter,
     WebBrowserAdapter,
     ImageGenerationAdapter,

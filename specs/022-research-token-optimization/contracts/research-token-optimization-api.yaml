@@ -1,0 +1,92 @@
+openapi: 3.0.3
+info:
+  title: Research Pipeline & Token Optimization (internal)
+  version: 0.1.0
+  description: |
+    Slice B of ADR-002. Documents env + web-search enrichment result shape.
+    **No new FE-callable HTTP paths** — runtime is internal to Execution ToolInvoker.
+paths: {}
+components:
+  schemas:
+    WebSearchToolConfig:
+      type: object
+      properties:
+        provider:
+          type: string
+          enum: [serpapi, duckduckgo, google-cse, gemini]
+        fallbackProvider:
+          type: string
+          enum: [serpapi, duckduckgo, google-cse, gemini]
+        engine:
+          type: string
+          enum: [google_shopping, google]
+        fetchLimit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        maxInputItems:
+          type: integer
+          minimum: 1
+        maxResults:
+          type: integer
+          description: Alias for maxInputItems
+        perBucket:
+          type: integer
+          minimum: 1
+    SearchItem:
+      type: object
+      required: [title, url, sourceUrl]
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+        sourceUrl:
+          type: string
+        brand:
+          type: string
+        price:
+          type: number
+        rating:
+          type: number
+        reviewCount:
+          type: integer
+        imageUrl:
+          type: string
+        snippet:
+          type: string
+        bucket:
+          type: string
+        score:
+          type: number
+    WebSearchEnrichmentResult:
+      type: object
+      required: [provider, source, query, results, meta]
+      properties:
+        provider:
+          type: string
+          enum: [serpapi, duckduckgo]
+        source:
+          type: string
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchItem'
+        meta:
+          type: object
+          required: [rawCount, afterDedup, selectedCount, fallbackUsed, buckets]
+          properties:
+            rawCount:
+              type: integer
+            afterDedup:
+              type: integer
+            selectedCount:
+              type: integer
+            fallbackUsed:
+              type: boolean
+            buckets:
+              type: array
+              items:
+                type: string

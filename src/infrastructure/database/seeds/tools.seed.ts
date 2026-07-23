@@ -37,7 +37,24 @@ const AGENT_TOOL_WIRING: Array<{ agentCode: string; toolCode: string }> = [
 function configForTool(code: string): Record<string, unknown> {
   switch (code) {
     case 'web-search':
-      return { provider: 'duckduckgo', maxResults: 5 };
+      return {
+        providers: ['serpapi', 'tavily'],
+        provider: 'serpapi',
+        fallbackProvider: 'duckduckgo',
+        engine: 'google_shopping',
+        searchDepth: 'basic',
+        fetchLimit: 50,
+        maxInputItems: 20,
+        perBucket: 5,
+        kindMix: { shopping: 10, article: 10 },
+        // Domain-specific queries live in config (not adapter code).
+        // Tokens {{season}} / {{category}} / {{market}} come from agent step input.
+        queryTemplates: [
+          'kids fashion trends {{season}} {{category}} {{market}}',
+          'children clothing trends {{market}} {{season}}',
+          'kids apparel fashion {{market}} {{season}}',
+        ],
+      };
     case 'image-generation':
       // Live Flux when TOOL_RUNTIME=live and FLUX_API_KEY / BFL_API_KEY set.
       // Adapter falls back to stub-live if provider is not "flux".

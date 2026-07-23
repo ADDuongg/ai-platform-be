@@ -80,6 +80,14 @@ export const toolRuntimeConfig = registerAs('toolRuntime', (): ToolRuntimeConfig
       endpointPath: process.env.FLUX_ENDPOINT_PATH ?? '/v1/flux-2-pro',
       pollIntervalMs: parseInt(process.env.FLUX_POLL_INTERVAL_MS ?? '500', 10),
     },
+    serpapi: {
+      apiKey: process.env.SERPAPI_API_KEY ?? '',
+      baseUrl: process.env.SERPAPI_BASE_URL ?? 'https://serpapi.com',
+    },
+    tavily: {
+      apiKey: process.env.TAVILY_API_KEY ?? '',
+      baseUrl: process.env.TAVILY_BASE_URL ?? 'https://api.tavily.com',
+    },
   };
 });
 

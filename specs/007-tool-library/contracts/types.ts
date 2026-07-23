@@ -75,12 +75,18 @@ export interface CreateToolRequest {
   changelog?: string;
 }
 
+/**
+ * PATCH /tools/:id — metadata on Tool; version fields apply to current draft only.
+ * `inputSchema` / `outputSchema` / `config` are editable while a draft version exists.
+ * Cannot change `toolType` or `code`.
+ */
 export interface UpdateToolRequest {
   name?: string;
   description?: string | null;
-  /** Cannot change toolType or code */
   config?: JsonObject;
+  /** Draft input JSON Schema */
   inputSchema?: JsonObject;
+  /** Draft output JSON Schema */
   outputSchema?: JsonObject;
   secretRef?: string | null;
   timeoutMs?: number | null;
@@ -142,6 +148,22 @@ export interface ToolVersionListResponse {
 
 export interface MessageResponse {
   message: string;
+}
+
+/** Static web-search provider catalog for Tool config UI (GET /tools/search-providers). */
+export type SearchProviderId =
+  | 'serpapi'
+  | 'tavily'
+  | 'duckduckgo'
+  | 'google-cse'
+  | 'gemini';
+
+export interface SearchProvider {
+  id: SearchProviderId | string;
+  label: string;
+  configured: boolean;
+  canBeFallback: boolean;
+  engines?: string[];
 }
 
 /** Agent assignment constraint mirrored for FE docs (enforced on Agents APIs). */

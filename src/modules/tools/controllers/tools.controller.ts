@@ -24,16 +24,21 @@ import { PERMISSIONS } from '@common/constants';
 import { CreateToolDto } from '../dto/create-tool.dto';
 import { CreateToolVersionDto } from '../dto/create-tool-version.dto';
 import { ListToolsQueryDto } from '../dto/list-tools-query.dto';
+import { SearchProviderDto } from '../dto/search-provider.dto';
 import { ToolResponseDto } from '../dto/tool-response.dto';
 import { ToolVersionResponseDto } from '../dto/tool-version-response.dto';
 import { UpdateToolDto } from '../dto/update-tool.dto';
+import { SearchProviderCatalogService } from '../services/search-provider-catalog.service';
 import { ToolsService } from '../services/tools.service';
 
 @ApiTags('Tools')
 @ApiBearerAuth('JWT')
 @Controller({ path: 'tools', version: '1' })
 export class ToolsController {
-  constructor(private readonly toolsService: ToolsService) {}
+  constructor(
+    private readonly toolsService: ToolsService,
+    private readonly searchProviderCatalog: SearchProviderCatalogService,
+  ) {}
 
   @Get()
   @Permissions(PERMISSIONS.TOOLS.READ)
@@ -43,6 +48,16 @@ export class ToolsController {
     @CurrentUser() user: JwtPayload,
   ): Promise<{ data: ToolResponseDto[]; meta: Record<string, number> }> {
     return this.toolsService.list(query, user.permissions);
+  }
+
+  @Get('search-providers')
+  @Permissions(PERMISSIONS.TOOLS.READ)
+  @ApiOperation({
+    summary: 'List web-search providers (static allowlist for Tool config UI)',
+  })
+  @ApiOkResponse({ type: [SearchProviderDto] })
+  listSearchProviders(): SearchProviderDto[] {
+    return this.searchProviderCatalog.listProviders();
   }
 
   @Post()

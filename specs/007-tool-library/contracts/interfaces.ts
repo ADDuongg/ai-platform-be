@@ -7,6 +7,7 @@ import type {
   CreateToolRequest,
   CreateToolVersionRequest,
   MessageResponse,
+  SearchProvider,
   ToolListQuery,
   ToolListResponse,
   ToolResponse,
@@ -32,4 +33,6 @@ export interface ToolsApiClient {
     body?: CreateToolVersionRequest,
   ): Promise<ToolVersionResponse>;
   getToolVersion(id: string, version: number): Promise<ToolVersionResponse>;
+  /** Static allowlist for web-search Tool config selects */
+  listSearchProviders(): Promise<{ data: SearchProvider[] }>;
 }

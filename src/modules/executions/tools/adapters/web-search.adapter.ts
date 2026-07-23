@@ -1,278 +1,204 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
+import { preprocessSearchItems, type RawSearchRow } from '../search-preprocess';
 import type { ToolAdapter, ToolAdapterInvokeInput } from '../tool-adapter';
-import { fetchWithTimeout, truncateWithMarker } from '../tool-http.util';
+import { truncateWithMarker } from '../tool-http.util';
+import { toEnrichmentResult } from './web-search/enrichment.mapper';
+import { buildSearchQueries } from './web-search/query-builder';
+import {
+  resolveFallbackProvider,
+  resolveFetchLimit,
+  resolveKindMix,
+  resolveMaxInputItems,
+  resolvePerBucket,
+  resolveProviders,
+  WEB_SEARCH_PROVIDER_REGISTRY,
+  type WebSearchProvider,
+  type WebSearchProviderId,
+  type WebSearchProviderRegistry,
+  type WebSearchProviderResult,
+} from './web-search';
 
-type SearchResult = { title: string; url: string; snippet: string };
-type SearchSource = 'duckduckgo-instant' | 'duckduckgo-html';
+type ProviderHit = WebSearchProviderResult & { query: string };
 
 /**
- * MVP: DuckDuckGo free search (Instant Answer + HTML fallback).
- * Future: Google Custom Search API.
+ * Orchestrates pluggable search providers + preprocess pipeline.
+ * Hybrid: fan-out `providers[]` (e.g. serpapi + tavily) → merge rows → preprocess.
+ * Fallback only when merged rows are empty.
  */
 @Injectable()
 export class WebSearchAdapter implements ToolAdapter {
   readonly code = 'web-search';
+  private readonly logger = new Logger(WebSearchAdapter.name);
+
+  constructor(
+    @Inject(WEB_SEARCH_PROVIDER_REGISTRY)
+    private readonly providers: WebSearchProviderRegistry,
+  ) {}
 
   async invoke(params: ToolAdapterInvokeInput): Promise<Record<string, unknown>> {
-    const queries = buildSearchQueries(params.input);
-    const maxResults =
-      typeof params.configJson.maxResults === 'number' && params.configJson.maxResults > 0
-        ? Math.min(params.configJson.maxResults, 10)
-        : 5;
+    const queries = buildSearchQueries(params.input, params.configJson);
+    const fetchLimit = resolveFetchLimit(params.configJson);
+    const maxInputItems = resolveMaxInputItems(params.configJson);
+    const perBucket = resolvePerBucket(params.configJson);
+    const providerIds = resolveProviders(params.configJson);
+    const fallbackId = resolveFallbackProvider(params.configJson, providerIds);
 
-    let results: SearchResult[] = [];
-    let activeQuery = queries[0];
-    let successfulSource: SearchSource = 'duckduckgo-instant';
+    const { hits, primaryAttempted } = await this.fanOutProviders(
+      providerIds,
+      queries,
+      params,
+      fetchLimit,
+    );
+    let fallbackUsed = false;
 
-    for (const query of queries) {
-      activeQuery = query;
-      results = await this.searchInstantAnswer(
-        query,
-        maxResults,
-        params.timeoutMs,
-        params.maxBytes,
-      );
-      if (results.length > 0) {
-        successfulSource = 'duckduckgo-instant';
-        break;
-      }
-      results = await this.searchHtml(query, maxResults, params.timeoutMs, params.maxBytes);
-      if (results.length > 0) {
-        successfulSource = 'duckduckgo-html';
-        break;
+    if (hits.length === 0 && fallbackId) {
+      const fallbackProvider = this.resolveAvailable(fallbackId, params.configJson);
+      if (fallbackProvider) {
+        const hit = await this.tryQueries(fallbackProvider, queries, params, fetchLimit);
+        if (hit) {
+          hits.push(hit);
+          fallbackUsed = primaryAttempted;
+        }
       }
     }
 
+    const activeQuery = hits[0]?.query ?? queries[0] ?? '';
+    const taggedRows = hits.flatMap((hit) => tagRows(hit));
+    const hybridConfigured = providerIds.length > 1;
+    const kindMix = resolveKindMix(
+      params.configJson,
+      maxInputItems,
+      hybridConfigured && taggedRows.length > 0,
+    );
+
+    const { items, meta } = preprocessSearchItems(taggedRows, {
+      query: activeQuery,
+      maxInputItems,
+      perBucket,
+      ...(kindMix ? { kindMix } : {}),
+    });
+
+    const providersUsed = [...new Set(hits.map((h) => h.provider))];
+    const sources = [...new Set(hits.map((h) => h.source))];
+    const persistedPaths = hits
+      .map((h) => h.persistedPath)
+      .filter((p): p is string => Boolean(p));
+    const rawCountByProvider: Record<string, number> = {};
+    for (const hit of hits) {
+      rawCountByProvider[hit.provider] = (rawCountByProvider[hit.provider] ?? 0) + hit.rows.length;
+    }
+
     const payload = {
-      provider: 'duckduckgo',
-      source: successfulSource,
+      provider: providersUsed.length > 1 ? 'hybrid' : (providersUsed[0] ?? providerIds[0] ?? 'serpapi'),
+      providersUsed,
+      source: sources.join('+') || 'empty',
       query: activeQuery,
       queriesTried: queries,
-      results,
+      results: items.map(toEnrichmentResult),
+      meta: {
+        ...meta,
+        fallbackUsed,
+        rawCountByProvider,
+        ...(persistedPaths.length === 1 ? { persistedPath: persistedPaths[0] } : {}),
+        ...(persistedPaths.length > 1 ? { persistedPaths } : {}),
+      },
     };
     const serialized = truncateWithMarker(JSON.stringify(payload), params.maxBytes);
     return JSON.parse(serialized) as Record<string, unknown>;
   }
 
-  private async searchInstantAnswer(
-    query: string,
-    maxResults: number,
-    timeoutMs: number,
-    maxBytes: number,
-  ): Promise<SearchResult[]> {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: 'GET',
-        headers: { 'User-Agent': 'ai-platform-be/1.0 (+local-dev)' },
-      },
-      timeoutMs,
+  private async fanOutProviders(
+    providerIds: WebSearchProviderId[],
+    queries: string[],
+    params: ToolAdapterInvokeInput,
+    fetchLimit: number,
+  ): Promise<{ hits: ProviderHit[]; primaryAttempted: boolean }> {
+    const available = providerIds
+      .map((id) => this.resolveAvailable(id, params.configJson))
+      .filter((p): p is WebSearchProvider => Boolean(p));
+
+    if (available.length === 0) {
+      this.logger.warn(
+        `web-search no available providers among [${providerIds.join(', ')}]`,
+      );
+      return { hits: [], primaryAttempted: false };
+    }
+
+    const settled = await Promise.all(
+      available.map(async (provider) => {
+        const hit = await this.tryQueries(provider, queries, params, fetchLimit);
+        return hit;
+      }),
     );
-    if (!res.ok) {
-      throw new Error(`web-search provider HTTP ${res.status}`);
+    return {
+      hits: settled.filter((hit): hit is ProviderHit => Boolean(hit)),
+      primaryAttempted: true,
+    };
+  }
+
+  private resolveAvailable(
+    id: WebSearchProviderId,
+    configJson: Record<string, unknown>,
+  ): WebSearchProvider | null {
+    const provider = this.providers.tryGet(id);
+    if (!provider) {
+      this.logger.warn(`web-search provider not registered: ${id}`);
+      return null;
     }
-    const rawText = truncateWithMarker(await res.text(), maxBytes);
-    let data: Record<string, unknown>;
-    try {
-      data = JSON.parse(rawText) as Record<string, unknown>;
-    } catch {
-      throw new Error('web-search provider returned non-JSON body');
+    if (!provider.isAvailable(configJson)) {
+      return null;
     }
-    return mapDuckDuckGoResults(data, maxResults).filter((result) => Boolean(result.url?.trim()));
+    return provider;
   }
 
-  private async searchHtml(
-    query: string,
-    maxResults: number,
-    timeoutMs: number,
-    maxBytes: number,
-  ): Promise<SearchResult[]> {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetchWithTimeout(
-      url,
-      {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; ai-platform-be/1.0; +https://localhost)',
-          Accept: 'text/html',
-        },
-      },
-      timeoutMs,
-    );
-    if (!res.ok) {
-      return [];
-    }
-    const html = truncateWithMarker(await res.text(), maxBytes);
-    return parseDuckDuckGoHtml(html, maxResults);
-  }
-}
-
-function buildSearchQueries(input: Record<string, unknown>): string[] {
-  if (typeof input.query === 'string' && input.query.trim()) {
-    return [input.query.trim()];
-  }
-  if (typeof input.q === 'string' && input.q.trim()) {
-    return [input.q.trim()];
-  }
-
-  const season = asTrimmedString(input.season);
-  const category = asTrimmedString(input.category);
-  const market = expandMarket(asTrimmedString(input.market));
-  const topic = asTrimmedString(input.topic) || asTrimmedString(input.keywords);
-
-  const queries: string[] = [];
-  if (topic) {
-    queries.push(topic);
-  }
-  if (season || category || market) {
-    const kidsFashionTrendsQuery = [
-      'kids fashion trends',
-      season,
-      category?.replace(/-/g, ' '),
-      market,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    const childrenClothingTrendsQuery =
-      `children clothing trends ${market || ''} ${season || ''}`.trim();
-    const kidsApparelFashionQuery = `kids apparel fashion ${market || 'Vietnam'} 2027`.trim();
-
-    queries.push(kidsFashionTrendsQuery, childrenClothingTrendsQuery, kidsApparelFashionQuery);
-  }
-
-  const unique = [...new Set(queries.map((query) => query.replace(/\s+/g, ' ').trim()).filter(Boolean))];
-  if (unique.length === 0) {
-    throw new Error(
-      'web-search requires input.query (or season/category/market) to build a search query',
-    );
-  }
-  return unique;
-}
-
-function asTrimmedString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function expandMarket(market: string): string {
-  const map: Record<string, string> = {
-    VN: 'Vietnam',
-    vn: 'Vietnam',
-    US: 'United States',
-    UK: 'United Kingdom',
-    JP: 'Japan',
-    KR: 'Korea',
-  };
-  return map[market] ?? market;
-}
-
-function mapDuckDuckGoResults(data: Record<string, unknown>, maxResults: number): SearchResult[] {
-  const results: SearchResult[] = [];
-
-  const heading = typeof data.Heading === 'string' ? data.Heading : '';
-  const abstract = typeof data.AbstractText === 'string' ? data.AbstractText : '';
-  const abstractUrl = typeof data.AbstractURL === 'string' ? data.AbstractURL : '';
-  if (abstract || abstractUrl) {
-    results.push({
-      title: heading || 'DuckDuckGo Abstract',
-      url: abstractUrl,
-      snippet: abstract,
-    });
-  }
-
-  const related = Array.isArray(data.RelatedTopics) ? data.RelatedTopics : [];
-  for (const item of related) {
-    if (results.length >= maxResults) break;
-    if (!item || typeof item !== 'object') continue;
-    const row = item as Record<string, unknown>;
-    if (Array.isArray(row.Topics)) {
-      for (const nested of row.Topics) {
-        if (results.length >= maxResults) break;
-        pushRelated(results, nested, maxResults);
-      }
-      continue;
-    }
-    pushRelated(results, row, maxResults);
-  }
-
-  return results.slice(0, maxResults);
-}
-
-function pushRelated(results: SearchResult[], item: unknown, maxResults: number): void {
-  if (results.length >= maxResults) return;
-  if (!item || typeof item !== 'object') return;
-  const row = item as Record<string, unknown>;
-  const text = typeof row.Text === 'string' ? row.Text : '';
-  const url =
-    row.FirstURL && typeof row.FirstURL === 'string'
-      ? row.FirstURL
-      : typeof row.URL === 'string'
-        ? row.URL
-        : '';
-  if (!url.trim()) return;
-  results.push({
-    title: text.slice(0, 120) || url,
-    url,
-    snippet: text,
-  });
-}
-
-/**
- * Best-effort parse of DuckDuckGo HTML results page.
- */
-function parseDuckDuckGoHtml(html: string, maxResults: number): SearchResult[] {
-  const results: SearchResult[] = [];
-  const seen = new Set<string>();
-
-  const linkRe = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = linkRe.exec(html)) !== null && results.length < maxResults) {
-    const href = decodeDuckDuckGoHref(match[1] ?? '');
-    const title = stripTags(match[2] ?? '').trim();
-    if (!href || !/^https?:\/\//i.test(href) || seen.has(href)) continue;
-    seen.add(href);
-    results.push({ title: title || href, url: href, snippet: '' });
-  }
-
-  if (results.length === 0) {
-    const uddgRe = /uddg=([^&"]+)/gi;
-    while ((match = uddgRe.exec(html)) !== null && results.length < maxResults) {
+  private async tryQueries(
+    provider: WebSearchProvider,
+    queries: string[],
+    params: ToolAdapterInvokeInput,
+    fetchLimit: number,
+  ): Promise<ProviderHit | null> {
+    for (const query of queries) {
       try {
-        const href = decodeURIComponent(match[1] ?? '');
-        if (!/^https?:\/\//i.test(href) || seen.has(href)) continue;
-        seen.add(href);
-        results.push({ title: href, url: href, snippet: '' });
-      } catch {
-        // ignore bad encoding
+        const result = await provider.search({
+          query,
+          fetchLimit,
+          timeoutMs: params.timeoutMs,
+          maxBytes: params.maxBytes,
+          input: params.input,
+          configJson: params.configJson,
+          storageRoot: params.storageRoot,
+        });
+        if (result.rows.length > 0) {
+          return { ...result, query };
+        }
+        this.logger.warn(`web-search provider=${provider.id} empty for query=${query}`);
+      } catch (err) {
+        this.logger.warn(
+          `web-search provider=${provider.id} failed for query=${query}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
+    return null;
   }
-
-  return results;
 }
 
-function decodeDuckDuckGoHref(href: string): string {
-  const trimmed = href.trim();
-  if (!trimmed) return '';
-  try {
-    const parsed = new URL(trimmed, 'https://duckduckgo.com');
-    const uddg = parsed.searchParams.get('uddg');
-    if (uddg) {
-      return decodeURIComponent(uddg);
-    }
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      return parsed.toString();
-    }
-  } catch {
-    return '';
-  }
-  return trimmed.startsWith('http') ? trimmed : '';
+function tagRows(hit: ProviderHit): RawSearchRow[] {
+  const kind = inferKind(hit);
+  return hit.rows.map((row) => ({
+    ...row,
+    _provider: hit.provider,
+    _source: hit.source,
+    _kind: kind,
+  }));
 }
 
-function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function inferKind(hit: ProviderHit): 'shopping' | 'article' | 'other' {
+  if (hit.source.includes('shopping')) return 'shopping';
+  if (hit.provider === 'serpapi') return 'article';
+  if (hit.provider === 'tavily') return 'article';
+  if (hit.provider === 'duckduckgo') return 'article';
+  return 'other';
 }

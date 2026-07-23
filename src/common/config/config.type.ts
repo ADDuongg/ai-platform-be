@@ -91,6 +91,14 @@ export interface ToolRuntimeConfig {
     endpointPath: string;
     pollIntervalMs: number;
   };
+  serpapi: {
+    apiKey: string;
+    baseUrl: string;
+  };
+  tavily: {
+    apiKey: string;
+    baseUrl: string;
+  };
 }
 
 export interface ArtifactStorageConfig {

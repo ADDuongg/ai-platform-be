@@ -2954,6 +2954,64 @@ Workflow Execution — ✅ Done · Tool runtime / object-storage adapter — ✅
 
 ---
 
+## Research Pipeline & Token Optimization
+
+Priority: High
+
+Status: Done
+
+Spec: `specs/022-research-token-optimization`
+
+ADR: `docs/optimize.md`
+
+Owner: BE (Execution tool runtime)
+
+Notes: 2026-07-23 — Slice B Done. SerpAPI primary (`SERPAPI_API_KEY`) + DuckDuckGo fallback; preprocess pipeline under `search-preprocess/`; seed `web-search` SerpAPI-first (`fetchLimit`/`maxInputItems`/`perBucket`). Jest: `pnpm exec jest src/modules/executions/tools/search-preprocess src/modules/executions/tools/adapters/web-search.adapter.spec.ts` (11 passed). Quickstart: `specs/022-research-token-optimization/quickstart.md`.
+
+Dependency
+
+Tool Runtime Adapters (015) — ✅ Done · Trend Research Workflow (008) — ✅ Done · Execution artifacts (021) — ✅ Done (raw mid-run persist deferred)
+
+Goal
+
+Giảm input token cho Research Agent: không đưa toàn bộ Search Provider JSON vào LLM. Backend preprocess bằng code, chỉ gửi Top N items đã project; SerpAPI là provider chính, DuckDuckGo là fallback. Downstream Agent (Analysis…) tiếp tục chỉ đọc Trend Finding — không đổi contract handoff.
+
+### Scope
+
+In scope (Slice B)
+
+- SerpAPI (`google_shopping` default) khi có `SERPAPI_API_KEY`; lỗi / empty / thiếu key → DuckDuckGo
+- Pipeline code-only: Normalize → Projection → Deduplicate → Ranking → Bucket sampling / Top N
+- Tool `configJson`: `provider`, `engine`, `fetchLimit`, `maxInputItems`, `perBucket` (alias `maxResults` → `maxInputItems`)
+- Enrichment payload chỉ chứa processed `results` + compact `meta` (không full SerpAPI JSON)
+- Seed `web-search` config SerpAPI-first; unit tests mocked HTTP
+- Spec + contracts (env / config / enrichment types; **no new public REST**)
+
+Out of scope (follow-up)
+
+- Hard tiktoken / per-agent token budget
+- Persist raw search mid-run vào `execution_artifacts`
+- Embedding / NLP clustering / vector DB
+- Đổi Analysis prompts (đã consume `trendFindings`)
+
+### Acceptance
+
+- [x] Có `SERPAPI_API_KEY` + `TOOL_RUNTIME=live` → `web-search` gọi SerpAPI; `results.length <= maxInputItems`
+- [x] Thiếu key / SerpAPI fail/empty → fallback DuckDuckGo; `meta.fallbackUsed` đúng khi đã thử SerpAPI
+- [x] Enrichment không chứa raw SerpAPI shopping dump; chỉ projected fields + meta counts
+- [x] Ranking không chỉ popularity; bucket sampling giữ diversity
+- [x] CI offline-safe không cần SerpAPI key; Jest preprocess + adapter green
+- [x] Spec `022` + BACKLOG Notes sau khi tests pass
+
+### Implementation Notes (Engineering)
+
+- Preprocess: `src/modules/executions/tools/search-preprocess/`
+- Adapter: extend `web-search.adapter.ts`; keep `results[].url` for `trend-evidence.util`
+- Config: `toolRuntime.serpapi` + `.env.example`
+- Feature folder: `specs/022-research-token-optimization`
+
+---
+
 # Future
 
 Workflow Marketplace

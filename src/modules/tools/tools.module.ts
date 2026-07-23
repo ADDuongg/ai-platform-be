@@ -8,12 +8,13 @@ import { ToolEntity } from './entities/tool.entity';
 import { ToolVersionEntity } from './entities/tool-version.entity';
 import { ToolVersionsRepository } from './repositories/tool-versions.repository';
 import { ToolsRepository } from './repositories/tools.repository';
+import { SearchProviderCatalogService } from './services/search-provider-catalog.service';
 import { ToolsService } from './services/tools.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ToolEntity, ToolVersionEntity]), AuditModule],
   controllers: [ToolsController],
-  providers: [ToolsService, ToolsRepository, ToolVersionsRepository],
+  providers: [ToolsService, ToolsRepository, ToolVersionsRepository, SearchProviderCatalogService],
   exports: [ToolsService],
 })
 export class ToolsModule {}

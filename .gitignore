@@ -37,6 +37,9 @@ yarn.lock
 /test-results/
 /playwright-report/
 
+# Local tool / artifact storage (SerpAPI dumps, blobs, …)
+.data/
+
 # Misc
 *.tsbuildinfo
 .turbo/

@@ -88,6 +88,37 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /tools/search-providers:
+    get:
+      tags: [Tools]
+      summary: List web-search providers (static allowlist)
+      operationId: listSearchProviders
+      security:
+        - bearerAuth: []
+      description: >
+        Requires `tools:read`. Static catalog for Tool config UI (provider / fallback selects).
+        `configured` reflects env credentials. Ids match web-search runtime adapters.
+      responses:
+        '200':
+          description: Search provider catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchProvider'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /tools/by-code/{code}:
     get:
       tags: [Tools]
@@ -138,13 +169,16 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [Tools]
-      summary: Update Tool metadata or draft version config
+      summary: Update Tool metadata or draft version config / schemas
       operationId: updateTool
       security:
         - bearerAuth: []
       description: >
         Requires `tools:update`. Cannot change `code` or `toolType`.
-        Published version config is immutable — updates apply to draft version only.
+        Published version config/schemas are immutable.
+        While a draft version exists (tool status `draft`, or published tool with a parallel draft),
+        callers MAY update `config`, `inputSchema`, and `outputSchema` on that draft via this PATCH.
+        If the tool is published with no draft version, clients must `POST /tools/{id}/versions` first.
       parameters:
         - $ref: '#/components/parameters/ToolId'
       requestBody:
@@ -153,6 +187,23 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateToolRequest'
+            examples:
+              updateDraftSchemas:
+                summary: Edit draft input/output schemas
+                value:
+                  inputSchema:
+                    type: object
+                    properties:
+                      prompt:
+                        type: string
+                    required: [prompt]
+                  outputSchema:
+                    type: object
+                    properties:
+                      assetUrl:
+                        type: string
+                    required: [assetUrl]
+                  changelog: Update I/O schemas
       responses:
         '200':
           description: Updated tool
@@ -382,6 +433,25 @@ components:
     ToolType:
       type: string
       enum: [search, browser, image_generation, storage, http, custom]
+    SearchProvider:
+      type: object
+      required: [id, label, configured, canBeFallback]
+      properties:
+        id:
+          type: string
+          enum: [serpapi, tavily, duckduckgo, google-cse, gemini]
+        label:
+          type: string
+        configured:
+          type: boolean
+          description: True when required env credentials are present
+        canBeFallback:
+          type: boolean
+        engines:
+          type: array
+          items:
+            type: string
+          description: Optional engines for this provider (e.g. SerpAPI)
     JsonObject:
       type: object
       additionalProperties: true
@@ -425,6 +495,10 @@ components:
           nullable: true
     UpdateToolRequest:
       type: object
+      description: >
+        Metadata fields (`name`, `description`) update the Tool row.
+        Version fields (`config`, `inputSchema`, `outputSchema`, `secretRef`, `timeoutMs`,
+        `maxRetries`, `changelog`) apply only to the current draft ToolVersion.
       properties:
         name:
           type: string
@@ -435,10 +509,13 @@ components:
           nullable: true
         config:
           $ref: '#/components/schemas/JsonObject'
+          description: Draft version config_json (must not contain plaintext secret-shaped keys)
         inputSchema:
           $ref: '#/components/schemas/JsonObject'
+          description: Draft version input JSON Schema; editable until the version is published
         outputSchema:
           $ref: '#/components/schemas/JsonObject'
+          description: Draft version output JSON Schema; editable until the version is published
         secretRef:
           type: string
           nullable: true

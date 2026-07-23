@@ -79,4 +79,9 @@ export const envValidationSchema = Joi.object({
   FLUX_BASE_URL: Joi.string().uri().optional(),
   FLUX_ENDPOINT_PATH: Joi.string().optional(),
   FLUX_POLL_INTERVAL_MS: Joi.number().integer().positive().optional(),
+
+  SERPAPI_API_KEY: Joi.string().allow('').optional(),
+  SERPAPI_BASE_URL: Joi.string().uri().optional(),
+  TAVILY_API_KEY: Joi.string().allow('').optional(),
+  TAVILY_BASE_URL: Joi.string().uri().optional(),
 });
