@@ -91,15 +91,10 @@ export const toolRuntimeConfig = registerAs('toolRuntime', (): ToolRuntimeConfig
   };
 });
 
-export const artifactStorageConfig = registerAs(
-  'artifactStorage',
-  (): ArtifactStorageConfig => {
-    const mode = (process.env.ARTIFACT_STORAGE ?? 'local').toLowerCase() as
-      | 'local'
-      | 's3';
-    return {
-      mode: mode === 's3' ? 's3' : 'local',
-      storageRoot: process.env.ARTIFACT_STORAGE_ROOT ?? '.data/execution-artifacts',
-    };
-  },
-);
+export const artifactStorageConfig = registerAs('artifactStorage', (): ArtifactStorageConfig => {
+  const mode = (process.env.ARTIFACT_STORAGE ?? 'local').toLowerCase() as 'local' | 's3';
+  return {
+    mode: mode === 's3' ? 's3' : 'local',
+    storageRoot: process.env.ARTIFACT_STORAGE_ROOT ?? '.data/execution-artifacts',
+  };
+});

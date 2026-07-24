@@ -117,7 +117,8 @@ export class TavilySearchProvider implements WebSearchProvider {
 
   private baseUrl(): string {
     const base =
-      this.configService.get('toolRuntime', { infer: true })?.tavily?.baseUrl ?? DEFAULT_TAVILY_BASE;
+      this.configService.get('toolRuntime', { infer: true })?.tavily?.baseUrl ??
+      DEFAULT_TAVILY_BASE;
     return base.replace(/\/$/, '');
   }
 }
